@@ -1,0 +1,468 @@
+MediPick Enterprise Workflow Engine
+Complete State Machine & Business Rules Specification
+This document specifies the complete configurable workflow engine underlying the MediPick pharmacy pickup platform: five independent, metadata-driven finite state machines coordinated by a central workflow engine, the business rules governing every transition, the medicine availability/reservation model, and the principles governing the frontend that renders it.
+1. Workflow Architecture Overview
+MediPick's order journey is decomposed into five independent workflows rather than one monolithic state machine. Each workflow owns a distinct concern and is only loosely coupled to the others through conditions -- e.g. the order workflow will not enter PREPARING unless the prescription workflow reports APPROVED, but the two machines otherwise progress independently.
+Workflow
+Purpose
+Controls
+ORDER_LIFECYCLE
+Main order journey
+Order progress
+PRESCRIPTION_VALIDATION
+Prescription approval
+Prescription medicines
+PAYMENT
+Money lifecycle
+Payment / refund
+PICKUP_VERIFICATION
+Customer identity verification
+OTP handover
+ISSUE_MANAGEMENT
+Post-delivery complaints
+Refund / replacement
+Design rule: every transition is defined by (current_state, event, condition, next_state, allowed_roles, actions) tuples stored in transitions.json / workflow metadata. No workflow's business logic is hardcoded in application code -- the engine only pattern-matches configuration against runtime metadata.
+2. ORDER_LIFECYCLE Workflow
+2.1 Purpose
+Controls the overall order journey from customer submission until completion, and is the workflow the other four synchronize against.
+2.2 States
+State
+Description
+Type
+DRAFT
+Customer creating the order
+Initial
+SUBMITTED
+Order sent to pharmacy
+Active
+PHARMACY_REVIEW
+Pharmacy reviewing order
+Active
+PREPARING
+Pharmacy preparing medicines
+Active
+READY_FOR_PICKUP
+Medicines ready
+Active
+COMPLETED
+Customer received medicine
+Terminal
+REJECTED
+Pharmacy rejected order
+Terminal
+CANCELLED
+Cancelled order
+Terminal
+NOT_COLLECTED
+Customer did not collect within deadline
+Recovery
+CLOSED
+Closed abandoned order
+Terminal
+2.3 State Diagram
+Dashed red arrows indicate the customer-initiated cancel_order path, available from any active state per the cancellation policy below (late cancellation from PREPARING / READY_FOR_PICKUP carries a warning but is still permitted).
+2.4 Transition Matrix
+Current State
+Event
+Actor
+Condition
+Next State
+DRAFT
+submit_order
+Customer
+At least one item exists
+SUBMITTED
+SUBMITTED
+review_order
+Pharmacy Staff
+Pharmacy received order
+PHARMACY_REVIEW
+PHARMACY_REVIEW
+approve_order
+Pharmacy Staff
+All items available AND prescription approved if required
+PREPARING
+PHARMACY_REVIEW
+reject_order
+Pharmacy Staff
+Rejection reason required
+REJECTED
+PREPARING
+mark_ready
+Pharmacy Staff
+Medicines prepared
+READY_FOR_PICKUP
+READY_FOR_PICKUP
+complete_order
+System
+Pickup completed (OTP + payment)
+COMPLETED
+Any active state
+cancel_order
+Customer
+Cancellation policy allows
+CANCELLED
+READY_FOR_PICKUP
+pickup_deadline_expired
+System
+48h deadline exceeded
+NOT_COLLECTED
+NOT_COLLECTED
+reopen_pickup
+Pharmacy
+Extension approved
+READY_FOR_PICKUP
+NOT_COLLECTED
+close_order
+System
+Resolution completed
+CLOSED
+2.5 Cancellation Policy
+State
+Allowed?
+Policy
+DRAFT
+Yes
+Normal cancellation
+SUBMITTED
+Yes
+Normal cancellation
+PHARMACY_REVIEW
+Yes
+Normal cancellation
+PREPARING
+Yes
+Late cancellation warning
+READY_FOR_PICKUP
+Yes
+Late cancellation warning
+OTP_VERIFIED
+No
+Handover already started
+COMPLETED
+No
+Use Issue Management instead
+Late cancellation metadata (customer cancels after preparation has begun):
+{ "late_cancellation": true,
+  "warning": "Medicine already prepared",
+  "metric": "customer_cancellation_after_preparation" }
+This metric is tracked for potential future policy (cancellation-frequency limits, pharmacy compensation) but does not itself block the cancellation -- the customer always retains the right to cancel up to handover.
+3. PRESCRIPTION_VALIDATION Workflow
+3.1 Purpose
+Handles prescription verification independently of the order flow. This workflow does not exist at all for a cart-only (OTC) order.
+3.2 States
+State
+Meaning
+NOT_REQUIRED
+OTC-only order -- workflow not instantiated
+UPLOADED
+Prescription image uploaded
+QUALITY_CHECK
+Automated image-quality / OCR checking
+PHARMACIST_REVIEW
+Human pharmacist verification
+APPROVED
+Accepted
+REJECTED
+Invalid prescription
+REQUEST_REUPLOAD
+Poor image quality
+3.3 State Diagram
+3.4 Clarity Score Routing
+Score
+Result
+≥ 70
+Auto-pass to PHARMACIST_REVIEW
+20 - 69
+Flagged for PHARMACIST_REVIEW (manual)
+< 20
+REQUEST_REUPLOAD -- rejected before reaching a pharmacist
+3.5 Transition Matrix
+Current
+Event
+Condition
+Next
+UPLOADED
+check_quality
+Image exists
+QUALITY_CHECK
+QUALITY_CHECK
+auto_pass
+clarity ≥ 70
+PHARMACIST_REVIEW
+QUALITY_CHECK
+flag_review
+20 ≤ clarity < 70
+PHARMACIST_REVIEW (flagged)
+QUALITY_CHECK
+reject_quality
+clarity < 20
+REQUEST_REUPLOAD
+REQUEST_REUPLOAD
+upload_new
+New image uploaded
+QUALITY_CHECK
+PHARMACIST_REVIEW
+approve
+Pharmacist approves
+APPROVED
+PHARMACIST_REVIEW
+reject
+Invalid prescription
+REJECTED
+3.6 Restrictions
+Customers can never approve their own prescription -- pharmacist- or doctor-role only.
+Pharmacist/doctor approval is mandatory; there is no auto-approval path once a case reaches PHARMACIST_REVIEW.
+OTC-only orders never instantiate this workflow at all -- ORDER_LIFECYCLE reads NOT_REQUIRED and skips straight to PHARMACY_REVIEW.
+Poor image quality routes to reupload, not rejection, unless the customer abandons the reupload loop.
+4. PAYMENT Workflow
+4.1 Purpose
+Controls the financial lifecycle independently of order fulfillment state. A customer may pay before or after the order reaches READY_FOR_PICKUP; the order machine only checks payment.status where it actually matters (before handover, before COMPLETED).
+4.2 States
+State
+Description
+UNPAID
+Payment not completed
+PAYMENT_PENDING
+Processing (gateway in flight)
+PAID
+Payment successful
+FAILED
+Payment attempt failed
+REFUND_PENDING
+Refund requested
+REFUNDED
+Money returned
+4.3 State Diagram
+4.4 Transition Matrix
+Current
+Event
+Condition
+Next
+UNPAID
+make_payment
+Valid payment method
+PAYMENT_PENDING
+PAYMENT_PENDING
+payment_success
+Gateway success
+PAID
+PAYMENT_PENDING
+payment_failed
+Gateway failure
+FAILED
+FAILED
+retry_payment
+Customer retries
+PAYMENT_PENDING
+PAID
+request_refund
+Issue approved
+REFUND_PENDING
+REFUND_PENDING
+process_refund
+Refund approved
+REFUNDED
+4.5 Restrictions
+Action
+Requirement
+Complete handover
+payment.status must be PAID
+Refund
+Requires Issue Management approval
+Retry
+Only from FAILED
+Cancel payment
+Governed by cancellation policy, not the payment machine itself
+5. PICKUP_VERIFICATION Workflow
+5.1 Purpose
+Controls OTP-based identity verification and physical handover. This is the workflow most often confused with payment -- they are deliberately independent.
+5.2 States
+State
+Meaning
+WAITING_FOR_PICKUP
+Waiting for the customer to arrive
+OTP_AVAILABLE
+OTP generated for this order
+OTP_VERIFIED
+Identity confirmed at the counter
+HANDED_OVER
+Medicine physically given to the customer
+5.3 State Diagram
+5.4 Transition Matrix
+Current
+Event
+Condition
+Next
+WAITING_FOR_PICKUP
+request_pickup_otp
+Order is READY_FOR_PICKUP
+OTP_AVAILABLE
+OTP_AVAILABLE
+verify_otp
+Correct OTP entered
+OTP_VERIFIED
+OTP_VERIFIED
+complete_handover
+payment.status == PAID
+HANDED_OVER
+5.5 The OTP ≠ Payment Rule
+This is a load-bearing rule for the whole architecture:
+OTP proves: “this is the correct customer.”
+Payment proves: “transaction obligations are complete.”
+Consequently a customer can be OTP-verified before paying (generating the OTP requires no payment condition), but the pharmacy cannot execute complete_handover -- and therefore cannot release the medicine -- until payment.status equals PAID. If handover is attempted while unpaid, the transition is blocked with reason PAYMENT_REQUIRED even though identity has already been confirmed.
+6. ISSUE_MANAGEMENT Workflow
+6.1 Purpose
+Handles problems reported after the customer has already received the medicine. Cancellation is explicitly not available past COMPLETED -- this workflow is the only route to a refund or replacement after handover.
+6.2 States
+State
+Meaning
+NO_ISSUE
+Normal / default state
+ISSUE_REPORTED
+Customer complaint filed
+UNDER_REVIEW
+Pharmacy investigating
+APPROVED
+Claim accepted
+REJECTED
+Claim denied
+REFUND_AUTHORIZED
+Refund allowed
+REPLACEMENT_AUTHORIZED
+Replacement allowed
+RESOLVED
+Case closed
+6.3 State Diagram
+6.4 Resolution Rules
+Scenario
+Result
+Wrong medicine delivered
+Refund or replacement -- pharmacy at fault
+Pharmacy packaging/dispensing mistake
+Pharmacy responsible; refund or replacement
+Customer changed their mind
+Rejected -- not a valid post-collection issue
+Medicine already used
+Rejected -- cannot refund consumed medicine
+Damaged package on arrival
+Routed to UNDER_REVIEW for inspection
+7. Cross-Workflow Dependencies
+The five workflows above are independent state machines, but specific transitions in one are gated on the state of another. The diagram below is the single most important one for demonstrating that coupling; the table beneath it is its tabular source of truth.
+Action
+Requires
+approve_order (Order Lifecycle)
+PRESCRIPTION_VALIDATION == APPROVED (if required) AND availability == AVAILABLE
+mark_ready (Order Lifecycle)
+Order already in approve_order's next state (PREPARING)
+request_pickup_otp (Pickup)
+Order Lifecycle == READY_FOR_PICKUP
+complete_handover (Pickup)
+PICKUP_VERIFICATION == OTP_VERIFIED AND PAYMENT == PAID
+complete_order (Order Lifecycle)
+PICKUP_VERIFICATION == HANDED_OVER
+request_refund (Payment)
+ISSUE_MANAGEMENT == APPROVED
+None of these dependencies are implemented as if/else branches in application code. Each is expressed as a condition object referencing another workflow's state path (e.g. {"prescription.status": "APPROVED"}), evaluated generically by the same condition evaluator used for every other rule.
+8. Medicine Availability & Reservation Model
+8.1 Why Not Full Inventory Management
+MediPick deliberately does not implement exact stock-count inventory. Pharmacies maintain a medicine catalogue with a manually-updated availability_status (AVAILABLE, OUT_OF_STOCK, TEMPORARILY_UNAVAILABLE, DISCONTINUED) rather than tracked quantities. Full inventory management would turn MediPick into a pharmacy ERP system, which is outside the project's scope.
+8.2 The Race-Condition Problem
+Catalogue availability alone is insufficient once more than one customer can order the same low-stock item concurrently -- e.g. a medicine with 1 physical box remaining and two simultaneous orders. Cart addition never reserves stock (the same principle marketplace platforms such as Uber Eats use: adding to cart means “I am interested,” not “this item is mine”). The reservation only happens once the pharmacy actively confirms availability for a specific order.
+8.3 Reservation State Machine
+8.4 Integration With Order Lifecycle
+Order Event
+Reservation Action
+Pharmacy runs confirm_availability / approve_order
+CREATE_RESERVATION -- medicine locked to this order
+Order cancelled at any cancellable state
+RELEASE_RESERVATION -- availability restored
+Payment refunded after cancellation
+RELEASE_RESERVATION (idempotent if already released)
+Order reaches COLLECTED / COMPLETED
+Reservation transitions to FULFILLED, not released
+Documentation framing for the assignment: “MediPick does not implement full pharmacy inventory management. Instead, pharmacies maintain medicine catalogue availability similar to marketplace platforms such as Uber Eats. Once an order is accepted by the pharmacy, the required medicines are temporarily reserved through a reservation mechanism. If the order is cancelled or refunded before completion, the reservation is released and availability is restored.”
+9. Metadata-Driven Frontend Principles
+The frontend is an internal workflow inspector / simulator, not a customer-facing ordering screen. Its governing rule:
+// WRONG -- business logic hardcoded in the UI
+if (state === "READY_FOR_PICKUP") showOTP();
+ 
+// CORRECT -- UI renders whatever the metadata describes
+contextFields.map(field => <DynamicField config={field} />)
+Every field the Context Simulator renders (OTP status, payment settlement, prescription clarity score, and any future field such as insurance approval) is generated from the transition's context_fields metadata, not from a name the frontend recognizes. Role-based access is implemented as an ordinary condition (a role key checked the same way as any other field), not a special-cased permission branch, so adding a new role or a new gated field requires a metadata change only.
+Available actions are always computed server-side and returned to the client; the frontend never independently decides whether an action is legal, only whether to render it and how to explain a validation failure returned by the engine.
+10. Enterprise Rules Summary
+Rule
+Enforcement
+Business rules cannot exist in the frontend
+Backend / workflow metadata only
+Business rules cannot exist as Python if/else
+transitions.json (config-driven engine)
+Every transition is logged
+Audit trail, keyed by audit_id + request_id
+Every action is permission-checked
+allowed_roles evaluated as an ordinary condition
+Every failure is explained
+Condition evaluator returns {code, severity, message} per unmet rule
+Refund after completion
+Routed through Issue Management, not Order cancellation
+No-show handling
+NOT_COLLECTED recovery state, not silent cancellation
+Mixed orders remain a single order
+Item-level source (CART vs PRESCRIPTION) evaluated within one order object
+11. Sequence Diagrams
+The state diagrams in the sections above show what each workflow can do in isolation. The sequence diagrams below show the same rules from the opposite angle -- who calls what, in what order, and which cross-workflow gate each call has to pass -- for the three scenarios that matter most in demonstration.
+11.1 Overall Order Journey (all three actors)
+The end-to-end path a mixed order takes across Customer, Pharmacy, and the Workflow Engine, including both cross-workflow gates: prescription approval before preparation, and payment before handover.
+11.2 OTC Order -- Happy Path
+No Prescription Validation workflow is instantiated at all for a cart-only order; the engine goes straight from availability confirmation to preparation.
+11.3 Prescription Order
+Clarity-score branching happens before a pharmacist is ever involved -- only clarity scores of 20 or above reach PHARMACIST_REVIEW at all. Once approved, this scenario rejoins the same payment/OTP sequence as the OTC path.
+11.4 Customer Ghosts the Pickup
+Demonstrates the recovery path rather than a failure: no data is lost and no order is silently cancelled. NOT_COLLECTED is a distinct state from CANCELLED specifically so a pharmacy can still reopen the pickup window without re-running the entire order.
+11.5 Mixed Order -- Cart Item + Prescription Item in ONE Order
+This is the scenario the original business rules were written around: a customer can add a non-prescription item (Betadine) to their cart and upload a prescription (Amoxicillin, Cetirizine) in the same checkout. MediPick creates exactly one order containing both item sources -- it never splits into two separate orders, and the two per-item source tags (CART vs PRESCRIPTION) live inside that single order's item list.
+The par / and block above is deliberate: prescription validation and cart-availability checking are independent branches of the same order, not a sequential dependency on each other. Both must clear before the single PHARMACY_REVIEW -> PREPARING transition fires -- the order does not proceed on partial clearance, and it does not fork into two orders that could complete at different times.
+12. Final Architecture & Transition Execution Flow
+The sections above specify what each workflow does. This section specifies how a single request actually moves through the system, end to end, and what happens inside the engine for every transition attempt regardless of which workflow it belongs to.
+12.1 System Architecture
+Every layer below has exactly one responsibility. The Workflow Engine box is intentionally the only place business conditions are evaluated -- everything above it is plumbing (routing, correlation, orchestration) and everything below it is side effects (notifications, chat, payment calls, security logging), never business logic itself.
+Layer
+Responsibility
+FastAPI Gateway
+Receives the request, generates/propagates the correlation (request) ID
+Order Service
+Orchestrates the lifecycle -- loads the order, calls the engine, persists the result
+Workflow Engine
+Pure decision: given (current_state, event, role, metadata), is this transition legal? Never sends messages, updates UI, or calls payment services itself
+State Commit
+Applies current_state -> next_state only after the engine says the transition is legal
+Audit Event
+Immutable record of the attempt -- created for both successes and failures
+Action Executor
+Dispatches the rule's actions[] (notification, chat, payment, security event) as independent, individually-tracked side effects
+Action Telemetry
+Records SUCCESS/FAILED per action -- a failed notification does not roll back the state commit
+12.2 Transition Execution Flow
+This is the same logic every workflow's engine runs -- Order Lifecycle, Payment, Pickup Verification, Prescription Validation, and Issue Management all share this one execution path; none of them has its own bespoke version of it.
+Two properties fall directly out of this flow and are worth stating explicitly for the report:
+State-first consistency: an invalid transition produces no state change, no committed actions, and no SUCCESS audit entry -- only a FAILED audit entry with the specific unmet codes. There is no partial-transition state.
+Uniform failure reporting: a rule mismatch (NO_SUCH_TRANSITION), a role mismatch (ROLE_REQUIRED), and an unmet business condition (e.g. OTP_REQUIRED, PAYMENT_REQUIRED) all return through the same {code, message} shape. The frontend never needs a special case for “wrong role” versus “wrong data” -- both are just unmet entries in the same list.
+Appendix A -- Sample Transition Configuration
+Representative excerpt of the JSON shape every workflow's rules are expressed in:
+{
+  "id": "T-010",
+  "event": "verify_customer_otp",
+  "label": "Verify Customer OTP",
+  "current_state": "READY_FOR_PICKUP",
+  "next_state": "PICKUP_VERIFIED",
+  "allowed_roles": ["PHARMACY_STAFF"],
+  "metadata": {
+    "category": "PRESCRIPTION_PICKUP",
+    "description": "Verify customer identity before releasing medicine.",
+    "context_fields": [
+      { "path": "pickup.otp_generated", "label": "OTP Generated", "type": "BOOLEAN", "editable": false, "required_value": true },
+      { "path": "pickup.otp_verified", "label": "OTP Verified", "type": "BOOLEAN", "editable": true, "required_value": true }
+    ]
+  }
+}

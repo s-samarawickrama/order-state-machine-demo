@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "cancellation": {
+    "late_cancel_states": ["PREPARING", "READY_FOR_PICKUP"],
+    "max_late_cancellations": 3
+  },
+  "no_show": {
+    "increase_count": true
+  }
+}

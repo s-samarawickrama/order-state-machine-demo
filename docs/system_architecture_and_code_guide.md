@@ -1,98 +1,179 @@
-# MediPick System Architecture & Code Walkthrough Guide
+# MediPick System Architecture & Coordinated FSM Design Guide
 
-This document provides a detailed technical reference for developers, architects, and stakeholders to understand the structure, execution lifecycle, and coding patterns of the **MediPick Unified Order Engine**.
-
----
-
-## 1. System Design & Philosophy
-
-The system's core design philosophy is **Configuration over Code (Declarative Architecture)**.
-
-Instead of writing complex, nested, and hard-to-maintain `if/else` branching logic inside Python code, we define all business logic, authorization rules, states, transitions, validation conditions, and side effects within a single JSON blueprint: [transitions.json](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/config/transitions.json).
-
-### The Five Coordinated FSMs
-The engine coordinates five independent, cooperating Finite State Machines (FSMs) concurrently:
-1. **`ORDER_LIFECYCLE`**: Tracks the master status of the order (`DRAFT` ➔ `SUBMITTED` ➔ `PREPARING` ➔ `READY_FOR_PICKUP` ➔ `COMPLETED` / `CANCELLED`).
-2. **`PRESCRIPTION_VALIDATION`**: Manages pharmacist validation flows (`PENDING` ➔ `UPLOADED` ➔ `APPROVED` / `REJECTED`).
-3. **`PAYMENT`**: Handles payment states (`UNPAID` ➔ `PAID` / `REFUNDED`).
-4. **`PICKUP_VERIFICATION`**: Tracks secure customer pickup flow (`WAITING_FOR_PICKUP` ➔ `OTP_SENT` ➔ `COLLECTED`).
-5. **`ISSUE_MANAGEMENT`**: Drives support ticket handling (`NO_ISSUE` ➔ `ISSUE_REPORTED` ➔ `UNDER_REVIEW` ➔ `RESOLVED`).
+This document provides a detailed technical reference explaining the architecture, design patterns, and engineering choices of the **MediPick Unified Order Engine**. It serves as a master reference to explain why this system is designed using coordinated sub-workflows instead of a monolithic state machine, how the data flows, and the business rationale behind every state transition.
 
 ---
 
-## 2. Technology Stack
+## 1. Monolithic vs. Coordinated Multi-FSM Architecture (The "Why")
 
-### Backend Technologies
-* **Python 3.x**: Core language.
-* **FastAPI**: Modern, fast web framework for building APIs.
-* **Uvicorn**: Lightweight, lightning-fast ASGI server.
-* **Pydantic**: Structural type annotations and input schema validation.
-* **InMemory Database**: Simple stateful memory store ([memory_store.py](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/storage/memory_store.py)) representing the active DB.
+In many enterprise order systems, developers model the entire lifecycle as a single monolithic state machine. However, for a complex pharmacy platform like MediPick, this pattern creates a high-maintenance, rigid code structure.
 
-### Frontend Technologies
-* **React 19**: Modern UI framework using Hooks and state orchestration.
-* **Vite**: Ultra-fast frontend build tool and dev server.
-* **Tailwind CSS & Shadcn UI**: Styling system and reusable UI component primitives.
-* **ReactFlow**: Library for building node-based interactive workflow graph visualizations.
-* **Framer Motion**: Smooth transition animations and state micro-animations.
-* **Lucide React**: Vector icons.
+### Why Not a Monolithic FSM? (The Anti-Pattern)
+If we combine all concerns (Order Lifecycles, Prescription Approvals, Payments, Counter Handovers, and Support Issues) into a single state machine, we face the following issues:
 
----
+1. **State Explosion:**
+   Every possible state combination requires its own unique, named state.
+   * *Example:* If we want to represent that the customer paid but the prescription is still under review, we need a state like `SUBMITTED_PAID_PRESCRIPTION_PENDING`. If we want to represent that the order is ready, paid, but has a dispute, we need `READY_PAID_DISPUTE_OPEN`.
+   * With just 9 order lifecycle states, 4 payment states, 6 prescription states, and 4 pickup states, the total combinations grow to $9 \times 4 \times 6 \times 4 = 864$ possible states!
+2. **Rigid & Unmaintainable Transitions:**
+   Adding a single state (e.g., a new verification method or payment status) requires rewriting the transition rules for almost all other states.
+3. **Tight Coupling:**
+   A payment gateway failure could block a clinical prescription approval because they are tied together in the same transition pipeline.
 
-## 3. How to Read the Code (Step-by-Step)
-
-If you are opening this repository for the first time, read the code in this exact order to understand how it flows:
+### Why Coordinated FSMs? (The MediPick Solution)
+MediPick decomposes the order entity into **five independent, decoupled workflows** that run in parallel.
 
 ```mermaid
 graph TD
-    A["1. config/transitions.json (The Rules)"] --> B["2. engine/workflow_engine.py (The Matcher)"]
-    B --> C["3. engine/condition_evaluator.py (The Evaluator)"]
-    C --> D["4. services/order_service.py (The Glue/DB)"]
-    D --> E["5. services/action_executor.py (The Side-Effects)"]
+    subgraph Coordinated FSMs
+        OL["ORDER_LIFECYCLE FSM<br>(The Physical Progress Spine)"]
+        PV["PRESCRIPTION_VALIDATION FSM<br>(The Clinical Gate)"]
+        PM["PAYMENT FSM<br>(The Financial Gate)"]
+        PU["PICKUP_VERIFICATION FSM<br>(Secure OTP Handover)"]
+        IM["ISSUE_MANAGEMENT FSM<br>(Post-pickup Dispute Handler)"]
+    end
+
+    OL -->|Condition Guards| PV
+    OL -->|Condition Guards| PM
+    OL -->|Condition Guards| PU
+    IM -->|Side-effect Actions| OL
+    IM -->|Side-effect Actions| PM
 ```
 
-### Step 1: Open [config/transitions.json](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/config/transitions.json)
-This file defines the states and transitions. Look at a transition block:
-* Notice how it specifies the required `current_state` and matching `event`.
-* Look at the `allowed_roles` checking who can trigger it.
-* Look at `conditions`: these must evaluate to `True` for the transition to occur.
-* Look at `actions`: these are side-effects dispatched upon success.
-
-### Step 2: Open [engine/workflow_engine.py](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/engine/workflow_engine.py)
-This is the machine itself.
-* **`execute_transition_with_reasons`**: Searches the configured workflows for a transition matching the active state and incoming event.
-* **Role Check**: Calls `_is_role_allowed` to match the user's role claim against configured role permissions.
-* **Condition Delegation**: Passes transition condition objects to the `ConditionEvaluator`.
-
-### Step 3: Open [engine/condition_evaluator.py](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/engine/condition_evaluator.py)
-This is where variables are checked.
-* **`evaluate_detailed`**: Iterates through each condition from the JSON config.
-* **`get_nested_value`**: Uses dot-notation paths (e.g., `states.PRESCRIPTION_VALIDATION` or `context.payment.status`) to extract actual values from the order context.
-* It compares values using operators (`equals`, `in`, `greater_than`, `within_hours`, etc.) completely dynamically.
-
-### Step 4: Open [services/order_service.py](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/services/order_service.py)
-This file orchestrates the workflow logic with persistent storage.
-* **State-First Commits**: It updates the state dictionary (`order["states"][wf_name] = next_state`) **prior** to running external side effects to maintain transactional integrity.
-* **Context Computation**: It computes derived context (like mapping order items' availability status to an overall order `availability.status` variable).
-* **Policy Hook**: Invokes the `PolicyEngine` to run custom business calculations (like penalty points on late cancellations).
-
-### Step 5: Open [services/action_executor.py](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/services/action_executor.py)
-This executes side-effect commands:
-* **`CREATE_RESERVATION`**: Reserves inventory.
-* **`REFUND_PAYMENT`**: Issues digital payment refund requests.
-* **`STRIP_UNAVAILABLE_ITEMS`**: Filters the order items to only keep verified available ones.
-* **`CREATE_REPLACEMENT_ORDER`**: Spawns a brand new linked replacement order automatically on pharmacy error.
-* **`DISPATCH_EVENT`**: Triggers a separate internal event cascade (e.g., starting automated OCR validation checks).
+#### The Advantages of Coordinated FSMs:
+* **Single Responsibility Principle:** Each FSM manages one specific business subdomain. The `PAYMENT` FSM is only concerned with money; the `PRESCRIPTION_VALIDATION` FSM is only concerned with clinical safety.
+* **Separation of Concerns:** A change to payment systems or the introduction of a new verification method (e.g. barcode scan) only updates its specific FSM without impacting other workflows.
+* **Modular UI:** The frontend React components can render decoupled widgets. For example, a payment status box listens to `PAYMENT`, while the counter check-in code listens to `PICKUP_VERIFICATION`.
+* **Declarative JSON Configuration:** Relationships and conditions are configured as data in a single file ([transitions.json](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/config/transitions.json)) rather than hardcoded in Python code.
 
 ---
 
-## 4. Key Execution Flow Trace
-When a user clicks "Confirm Order" as a `CUSTOMER` in the UI:
-1. **Frontend Request**: The browser issues a `POST` request to `http://localhost:8000/orders/{order_id}/transition` with the payload `{"event": "submit_order", "user_role": "CUSTOMER"}`.
-2. **Controller Layer**: [api/routes.py](file:///c:/Users/KINGSLEY/Desktop/order-state-machine-demo/api/routes.py#L229) intercepts the API call and calls `order_service.execute_order_event_sync(...)`.
-3. **Context Construction**: `OrderService` builds the evaluation context with active state, role, and metadata overrides.
-4. **FSM Execution**: `WorkflowEngine` matches the transition `OL-001`. It verifies the role `CUSTOMER` is allowed and that all validation conditions are met.
-5. **State Update**: `OrderService` commits the new state (`ORDER_LIFECYCLE` becomes `SUBMITTED`).
-6. **Side Effect Dispatch**: The system notices `OL-001` has actions: `notify_pharmacy` and `start_validation`.
-7. **Action Execution**: `ActionExecutor` executes `DISPATCH_EVENT` for `start_validation`. This advances the `PRESCRIPTION_VALIDATION` state-machine autonomously.
-8. **Frontend Response**: The updated state schema is returned to the React frontend, which immediately updates the UI dashboard and workflow monitor graphs.
+## 2. Core Architectural Layers
+
+The backend follows a clean, decoupled layer structure, routing requests from the HTTP controller to the core declarative workflow engine.
+
+```mermaid
+graph TD
+    A["API Controller (api/routes.py)"] --> B["Service Layer (services/order_service.py)"]
+    B --> C["Workflow Engine (engine/workflow_engine.py)"]
+    C --> D["Condition Evaluator (engine/condition_evaluator.py)"]
+    B --> E["Action Executor (services/action_executor.py)"]
+    B --> F["Policy Engine (engine/policy_engine.py)"]
+    B --> G["Memory Database (storage/memory_store.py)"]
+```
+
+### Layer 1: Declarative Configuration (`config/transitions.json`)
+The system's "source of truth". All state machines, valid transitions, allowed actor roles (RBAC), condition rules, and side-effects are defined in this single JSON file. It decouples business rules from the execution code.
+
+### Layer 2: API Controller (`api/routes.py`)
+Handles HTTP requests. It maps scenario loading, transition execution, and context updates to the service layer. It does not contain any state machine logic.
+
+### Layer 3: Service Layer (`services/order_service.py`)
+Orchestrates application workflow:
+1. Builds the runtime context, including checking customer preferences (like `accept_substitutes`) and computing derived data (like overall catalogue item availability).
+2. Executes transitions in a transaction-safe manner: it updates the state dictionary (`order["states"]`) **prior** to dispatching side-effect actions.
+3. Invokes the policy engine.
+
+### Layer 4: Workflow Engine (`engine/workflow_engine.py`)
+The pattern matcher. It searches the JSON configuration for a transition matching the active state and incoming event. It checks:
+* **Actor Role Authorization:** Ensures the user role matches the transition's `allowed_roles`.
+* **Condition Evaluation:** Sends condition arrays to the evaluation engine.
+
+### Layer 5: Condition Evaluator (`engine/condition_evaluator.py`)
+Uses dot-notation (e.g., `states.PRESCRIPTION_VALIDATION` or `context.preferences.accept_substitutes`) to extract live values from the order context and compare them using operators (`equals`, `in`, `within_hours`, etc.).
+
+### Layer 6: Action Executor (`services/action_executor.py`)
+Runs asynchronous or secondary side-effect actions dispatched by the transitions, such as creating stock reservations, updating payment gateway mock statuses, removing items from carts, and spawning replacement orders.
+
+---
+
+## 3. Order Flow Sequence Diagrams
+
+### 1. OTC (Over-the-Counter) Order Flow
+For orders containing only OTC items, prescription validation is automatically bypassed.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer
+    actor Staff
+    participant Core as ORDER_LIFECYCLE FSM
+    participant Pay as PAYMENT FSM
+    participant Stock as Action Executor (Reservations)
+
+    Customer->>Core: submit_order (DRAFT -> SUBMITTED)
+    Note over Core: Bypasses prescription validation
+    Core->>Core: Move to WAITING_PHARMACY_CONFIRMATION
+    Staff->>Core: pharmacy_confirm (checks stock)
+    Core->>Core: Move to WAITING_CUSTOMER_CONFIRMATION
+    Customer->>Core: customer_confirm
+    Core->>Pay: Trigger Payment (UNPAID -> PAID)
+    Core->>Stock: Trigger CREATE_RESERVATION
+    Core->>Core: Move to PREPARING
+    Staff->>Core: mark_ready (PREPARING -> READY_FOR_PICKUP)
+```
+
+### 2. Prescription & Mixed Order Flow
+For orders requiring a prescription, the clinical validation gate is enforced first.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer
+    actor Pharmacist
+    actor Staff
+    participant Core as ORDER_LIFECYCLE FSM
+    participant Rx as PRESCRIPTION_VALIDATION FSM
+
+    Customer->>Core: submit_order (DRAFT -> SUBMITTED)
+    Core->>Rx: start_validation (UPLOADED)
+    Note over Rx: Automated clarity checks...
+    Rx->>Rx: Move to QUALITY_CHECK
+    Rx->>Rx: Flag to PHARMACIST_REVIEW
+    Pharmacist->>Rx: approve_prescription (PHARMACIST_REVIEW -> APPROVED)
+    Note over Core: Clinical approval unlocks pharmacy review!
+    Staff->>Core: pharmacy_confirm
+    Core->>Core: Move to WAITING_CUSTOMER_CONFIRMATION
+    Customer->>Core: customer_confirm
+    Core->>Core: Move to PREPARING
+```
+
+### 3. Post-Pickup Issue & Replacement Flow
+If an issue is reported after the order has been completed, the issue management workflow takes over.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer
+    actor Pharmacist
+    participant Core as ORDER_LIFECYCLE FSM
+    participant Issue as ISSUE_MANAGEMENT FSM
+    participant Pay as PAYMENT FSM
+    participant Executor as Action Executor
+
+    Note over Core: Order is in COMPLETED state
+    Customer->>Issue: report_issue (NO_ISSUE -> ISSUE_REPORTED)
+    Pharmacist->>Issue: start_investigation (ISSUE_REPORTED -> UNDER_REVIEW)
+    Pharmacist->>Issue: resolve_issue (UNDER_REVIEW -> RESOLVED)
+    Issue->>Pay: refund_payment (PAID -> REFUNDED)
+    Issue->>Executor: Trigger CREATE_REPLACEMENT_ORDER
+    Executor->>Executor: Create a new linked order (PREPARING)
+```
+
+---
+
+## 4. Business Rules & States Rationale
+
+1. **Why do we have `WAITING_CUSTOMER_CONFIRMATION`?**
+   * **Quote Approval:** If the pharmacy proposes brand substitutions or items are unavailable, the final cost change must be confirmed by the customer.
+   * **Checkout Preference Integration:** The customer can tick the "Accept Brand Substitutes" checkbox. While this gives the pharmacy authorization to replace items, the customer still performs a final confirmation step to approve the quote before making the payment.
+   * **Auto-Expiration:** If the customer does not confirm within the allowed timeline, the order is cancelled to avoid locking pharmacy stock.
+
+2. **Why does payment happen before `PREPARING`?**
+   * Preparing medicines requires decanting, labeling, and clinical packaging. This costs pharmacist labor and uses up physical stock. Payment authorization occurs prior to preparation to prevent financial losses from no-shows.
+
+3. **Why does `PICKUP_VERIFICATION` require a separate FSM?**
+   * Medicine handover is a legally critical step. An OTP-based verification FSM ensures the customer picking up the medicine matches the buyer, preventing fraud or incorrect dispensing. Keeping it in a separate FSM makes it easy to add face-verification or ID-scanner steps later.
+
+4. **Why is `ISSUE_MANAGEMENT` decoupled?**
+   * Once an order reaches the terminal `COMPLETED` state, the main lifecycle is frozen. Using a separate FSM allows the system to run dispute-resolution processes (refunds and linked replacement orders) without reopening the main order workflow.

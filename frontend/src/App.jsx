@@ -8,6 +8,7 @@ import OrdersView from "@/components/features/OrdersView";
 import SimulatorView from "@/components/features/SimulatorView";
 import AuditExplorer from "@/components/features/AuditExplorer";
 import ConfigurationView from "@/components/features/ConfigurationView";
+import ApiTesterView from "@/components/features/ApiTesterView";
 
 /**
  * Root application component.
@@ -92,6 +93,15 @@ export default function App() {
 
       {activeView === "configuration" && (
         <ConfigurationView workflowConfig={workflowConfig} />
+      )}
+
+      {activeView === "api-tester" && (
+        <ApiTesterView
+          workflowConfig={workflowConfig}
+          order={order}
+          activeRole={activeRole}
+          onLoadScenario={handleLoadScenario}
+        />
       )}
     </AppShell>
   );

@@ -1,6 +1,6 @@
 import React from "react";
 import {
-  Workflow, LayoutDashboard, Box, Play, Clock, Settings,
+  Workflow, LayoutDashboard, Box, Play, Clock, Settings, Terminal
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -15,6 +15,7 @@ const NAVIGATION_ITEMS = [
   { id: "simulator",     label: "Simulator",      icon: Play },
   { id: "audit",         label: "Audit Explorer", icon: Clock },
   { id: "configuration", label: "Configuration",  icon: Settings },
+  { id: "api-tester",     label: "API Tester",     icon: Terminal },
 ];
 
 const ROLE_OPTIONS = [

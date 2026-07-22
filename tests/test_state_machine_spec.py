@@ -17,9 +17,6 @@ def test_payment_is_blocked_before_customer_confirmation():
     current_states = {
         "ORDER_LIFECYCLE": "WAITING_PHARMACY_CONFIRMATION",
         "PAYMENT": "UNPAID",
-        "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-        "ISSUE_MANAGEMENT": "NO_ISSUE",
-        "PRESCRIPTION_VALIDATION": "UPLOADED",
     }
     context = {"states": current_states, "user_role": "CUSTOMER"}
 
@@ -41,8 +38,6 @@ def test_payment_becomes_available_after_customer_confirmation():
     current_states = {
         "ORDER_LIFECYCLE": "PREPARING",
         "PAYMENT": "UNPAID",
-        "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-        "ISSUE_MANAGEMENT": "NO_ISSUE",
     }
     context = {"states": current_states, "user_role": "CUSTOMER"}
 
@@ -65,14 +60,18 @@ def test_handover_requires_otp_and_payment():
     current_states = {
         "ORDER_LIFECYCLE": "READY_FOR_PICKUP",
         "PAYMENT": "UNPAID",
-        "PICKUP_VERIFICATION": "OTP_VERIFIED",
-        "ISSUE_MANAGEMENT": "NO_ISSUE",
     }
-    context = {"states": current_states, "user_role": "PHARMACY_STAFF"}
+    context = {
+        "states": current_states, 
+        "user_role": "PHARMACY_STAFF",
+        "pickup": {
+            "otp_verified": True
+        }
+    }
 
     decision, errors = engine.execute_transition_with_reasons(
         current_states=current_states,
-        event="complete_handover",
+        event="complete_order",
         workflow_context=context,
     )
 
@@ -86,11 +85,8 @@ def test_prescription_approval_requires_pharmacist():
     engine = WorkflowEngine(config)
 
     current_states = {
-        "ORDER_LIFECYCLE": "SUBMITTED",
+        "ORDER_LIFECYCLE": "PRESCRIPTION_VALIDATION",
         "PAYMENT": "UNPAID",
-        "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-        "ISSUE_MANAGEMENT": "NO_ISSUE",
-        "PRESCRIPTION_VALIDATION": "PHARMACIST_REVIEW",
     }
     context = {"states": current_states, "user_role": "CUSTOMER"}
 
@@ -112,8 +108,6 @@ def test_issue_management_starts_after_completion():
     current_states = {
         "ORDER_LIFECYCLE": "SUBMITTED",
         "PAYMENT": "PAID",
-        "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-        "ISSUE_MANAGEMENT": "NO_ISSUE",
     }
     context = {"states": current_states, "user_role": "CUSTOMER"}
 
@@ -124,7 +118,7 @@ def test_issue_management_starts_after_completion():
     )
 
     assert decision is None
-    assert any(error["code"] == "ORDER_NOT_COMPLETED" for error in errors)
+    assert any(error["code"] == "INVALID_EVENT" for error in errors)
 
 
 def test_prescription_submit_routes_to_pharmacist_when_score_is_high():
@@ -135,8 +129,6 @@ def test_prescription_submit_routes_to_pharmacist_when_score_is_high():
         "states": {
             "ORDER_LIFECYCLE": "DRAFT",
             "PAYMENT": "UNPAID",
-            "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-            "ISSUE_MANAGEMENT": "NO_ISSUE"
         },
         "customer_id": "CUS-001",
         "chat_messages": [],
@@ -154,7 +146,7 @@ def test_prescription_submit_routes_to_pharmacist_when_score_is_high():
 
     order_service.execute_order_event_sync(order_id, "submit_order", "CUSTOMER", "REQ-RX")
 
-    assert ORDERS_DATABASE[order_id]["states"]["PRESCRIPTION_VALIDATION"] == "PHARMACIST_REVIEW"
+    assert ORDERS_DATABASE[order_id]["states"]["ORDER_LIFECYCLE"] == "PRESCRIPTION_VALIDATION"
 
 
 def test_pharmacist_can_reject_prescription_or_cancel_order_during_review():
@@ -162,17 +154,13 @@ def test_pharmacist_can_reject_prescription_or_cancel_order_during_review():
     WorkflowValidator.validate(config)
     engine = WorkflowEngine(config)
 
-    # State during review phase
     current_states = {
-        "ORDER_LIFECYCLE": "WAITING_PHARMACY_CONFIRMATION",
-        "PRESCRIPTION_VALIDATION": "PHARMACIST_REVIEW",
+        "ORDER_LIFECYCLE": "PRESCRIPTION_VALIDATION",
         "PAYMENT": "UNPAID",
-        "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-        "ISSUE_MANAGEMENT": "NO_ISSUE",
     }
     context = {"states": current_states, "user_role": "PHARMACIST"}
 
-    # 1. Pharmacist rejects prescription -> PRESCRIPTION_VALIDATION moves to REJECTED
+    # 1. Pharmacist rejects prescription -> ORDER_LIFECYCLE moves to CANCELLED
     decision_reject, errors_reject = engine.execute_transition_with_reasons(
         current_states=current_states,
         event="reject_prescription",
@@ -180,7 +168,7 @@ def test_pharmacist_can_reject_prescription_or_cancel_order_during_review():
     )
     assert errors_reject == []
     assert decision_reject is not None
-    assert decision_reject["next_state"] == "REJECTED"
+    assert decision_reject["next_state"] == "CANCELLED"
 
     # 2. Pharmacist cancels entire order -> ORDER_LIFECYCLE moves to CANCELLED
     decision_cancel, errors_cancel = engine.execute_transition_with_reasons(
@@ -191,5 +179,3 @@ def test_pharmacist_can_reject_prescription_or_cancel_order_during_review():
     assert errors_cancel == []
     assert decision_cancel is not None
     assert decision_cancel["next_state"] == "CANCELLED"
-
-

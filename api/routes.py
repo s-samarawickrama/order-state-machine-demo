@@ -10,9 +10,7 @@ def _base_order(order_id: str, order_type: str, items: list, include_prescriptio
     """Factory for a canonical blank order structure."""
     states = {
         "ORDER_LIFECYCLE": "DRAFT",
-        "PAYMENT": "UNPAID",
-        "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-        "ISSUE_MANAGEMENT": "NO_ISSUE"
+        "PAYMENT": "UNPAID"
     }
     return {
         "order_id": order_id,
@@ -152,10 +150,8 @@ SCENARIOS = {
         "include_prescription": False,
         "overrides": {
             "states": {
-                "ORDER_LIFECYCLE": "COMPLETED",
-                "PAYMENT": "PAID",
-                "PICKUP_VERIFICATION": "COLLECTED",
-                "ISSUE_MANAGEMENT": "ISSUE_REPORTED"
+                "ORDER_LIFECYCLE": "ISSUE_REPORTED",
+                "PAYMENT": "PAID"
             }
         },
         "summary": "Open the issue-management workflow post-collection for a customer complaint.",
@@ -174,10 +170,8 @@ SCENARIOS = {
         "include_prescription": False,
         "overrides": {
             "states": {
-                "ORDER_LIFECYCLE": "COMPLETED",
-                "PAYMENT": "PAID",
-                "PICKUP_VERIFICATION": "COLLECTED",
-                "ISSUE_MANAGEMENT": "UNDER_REVIEW"
+                "ORDER_LIFECYCLE": "UNDER_REVIEW",
+                "PAYMENT": "PAID"
             }
         },
         "summary": "Show the pharmacist review and replacement-order path for a pharmacy error case.",
@@ -323,10 +317,10 @@ def update_order_context(order_id: str, context_updates: dict, req: Request, rol
     
     # Auto-trigger prescription OCR validation if clarity score updated and validation is pending
     if "prescription" in context_updates and "clarity_score" in context_updates["prescription"]:
-        rx_state = order.get("states", {}).get("PRESCRIPTION_VALIDATION")
-        if rx_state in ["UPLOADED", "VALIDATING"]:
+        rx_state = order.get("states", {}).get("ORDER_LIFECYCLE")
+        if rx_state == "SUBMITTED":
             # Perform automatic validation pass
-            order_service.execute_order_event_sync(order_id, "start_validation", role_claim="SYSTEM")
+            order_service.execute_order_event_sync(order_id, "start_validation", role_claim="SYSTEM", request_id=f"AUTO-RX-VAL-{order_id}")
 
     return {"success": True, "data": order_service.get_order(order_id, role_claim=role)}
 

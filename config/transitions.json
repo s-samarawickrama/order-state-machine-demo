@@ -1,25 +1,29 @@
 {
-  "version": "10.0",
-  "description": "MediPick Unified Order Engine implementing the requested FSM specification for order lifecycle, prescription validation, payment, pickup verification, and issue management.",
+  "version": "11.0",
+  "description": "MediPick Simplified Order Engine implementing the 2-FSM architecture (ORDER_LIFECYCLE and PAYMENT) with linear prescription review and OTP verification.",
   "workflows": {
 
     "ORDER_LIFECYCLE": {
       "initial_state": "DRAFT",
-      "terminal_states": ["COMPLETED", "CANCELLED", "CLOSED"],
+      "terminal_states": ["COMPLETED", "CANCELLED", "CLOSED", "RESOLVED", "REJECTED"],
       "states": [
         { "id": "DRAFT", "display_name": "Draft", "color": "slate" },
         { "id": "SUBMITTED", "display_name": "Submitted", "color": "blue" },
-        { "id": "WAITING_PHARMACY_CONFIRMATION", "display_name": "Waiting Pharmacy Confirmation", "color": "purple" },
+        { "id": "PRESCRIPTION_VALIDATION", "display_name": "Prescription Validation", "color": "purple" },
+        { "id": "AWAITING_PRESCRIPTION_UPLOAD", "display_name": "Awaiting Rx Re-upload", "color": "amber" },
+        { "id": "WAITING_PHARMACY_CONFIRMATION", "display_name": "Waiting Pharmacy Confirmation", "color": "indigo" },
         { "id": "WAITING_CUSTOMER_CONFIRMATION", "display_name": "Waiting Customer Confirmation", "color": "orange" },
-        { "id": "PREPARING", "display_name": "Preparing", "color": "indigo" },
+        { "id": "PREPARING", "display_name": "Preparing", "color": "pink" },
         { "id": "READY_FOR_PICKUP", "display_name": "Ready for Pickup", "color": "green" },
-        { "id": "NOT_COLLECTED", "display_name": "Not Collected", "color": "red" },
         { "id": "COMPLETED", "display_name": "Completed", "color": "emerald" },
         { "id": "CANCELLED", "display_name": "Cancelled", "color": "gray" },
-        { "id": "CLOSED", "display_name": "Closed", "color": "zinc" }
+        { "id": "CLOSED", "display_name": "Closed", "color": "zinc" },
+        { "id": "ISSUE_REPORTED", "display_name": "Issue Reported", "color": "orange" },
+        { "id": "UNDER_REVIEW", "display_name": "Under Review", "color": "blue" },
+        { "id": "RESOLVED", "display_name": "Resolved", "color": "emerald" },
+        { "id": "REJECTED", "display_name": "Claim Rejected", "color": "red" }
       ],
       "transitions": [
-
         {
           "id": "OL-001",
           "label": "Place Order",
@@ -28,11 +32,10 @@
           "allowed_roles": ["CUSTOMER"],
           "next_state": "SUBMITTED",
           "actions": [
-            { "type": "DISPATCH_EVENT", "event": "notify_pharmacy" },
-            { "type": "DISPATCH_EVENT", "event": "start_validation" }
+            { "type": "DISPATCH_EVENT", "event": "start_validation" },
+            { "type": "DISPATCH_EVENT", "event": "skip_validation" }
           ]
         },
-
         {
           "id": "OL-001B",
           "label": "Discard Cart",
@@ -41,156 +44,177 @@
           "allowed_roles": ["CUSTOMER"],
           "next_state": "CANCELLED"
         },
-
         {
-          "id": "OL-002",
-          "label": "Notify Pharmacy",
+          "id": "OL-002A",
+          "label": "Start Prescription Validation",
           "current_state": "SUBMITTED",
-          "event": "notify_pharmacy",
+          "event": "start_validation",
           "allowed_roles": ["SYSTEM"],
+          "conditions": [
+            { "path": "order_type", "operator": "not_in", "value": ["OTC"] }
+          ],
+          "next_state": "PRESCRIPTION_VALIDATION"
+        },
+        {
+          "id": "OL-002B",
+          "label": "Skip Prescription Validation",
+          "current_state": "SUBMITTED",
+          "event": "skip_validation",
+          "allowed_roles": ["SYSTEM"],
+          "conditions": [
+            { "path": "order_type", "operator": "equals", "value": "OTC" }
+          ],
           "next_state": "WAITING_PHARMACY_CONFIRMATION"
         },
-
         {
           "id": "OL-003",
+          "label": "Approve Prescription",
+          "current_state": "PRESCRIPTION_VALIDATION",
+          "event": "approve_prescription",
+          "allowed_roles": ["PHARMACIST"],
+          "next_state": "WAITING_PHARMACY_CONFIRMATION"
+        },
+        {
+          "id": "OL-004",
+          "label": "Reject Prescription",
+          "current_state": "PRESCRIPTION_VALIDATION",
+          "event": "reject_prescription",
+          "allowed_roles": ["PHARMACIST"],
+          "next_state": "CANCELLED"
+        },
+        {
+          "id": "OL-005",
+          "label": "Request Rx Re-upload",
+          "current_state": "PRESCRIPTION_VALIDATION",
+          "event": "request_clarification",
+          "allowed_roles": ["PHARMACIST"],
+          "next_state": "AWAITING_PRESCRIPTION_UPLOAD"
+        },
+        {
+          "id": "OL-006",
+          "label": "Re-upload Prescription",
+          "current_state": "AWAITING_PRESCRIPTION_UPLOAD",
+          "event": "reupload_prescription",
+          "allowed_roles": ["CUSTOMER"],
+          "next_state": "PRESCRIPTION_VALIDATION"
+        },
+        {
+          "id": "OL-007",
           "label": "Pharmacy Confirms",
           "current_state": "WAITING_PHARMACY_CONFIRMATION",
           "event": "pharmacy_confirm",
           "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
-          "conditions": [
-            {
-              "path": "states.PRESCRIPTION_VALIDATION",
-              "operator": "in",
-              "value": ["APPROVED", null]
-            }
-          ],
-          "validation_errors": {
-            "states.PRESCRIPTION_VALIDATION": {
-              "code": "PRESCRIPTION_NOT_APPROVED",
-              "severity": "BLOCKING",
-              "message": "Prescription must be validated and approved by the pharmacist before order confirmation."
-            }
-          },
           "next_state": "WAITING_CUSTOMER_CONFIRMATION"
         },
-
         {
-          "id": "OL-004",
+          "id": "OL-008",
           "label": "Customer Confirms",
           "current_state": "WAITING_CUSTOMER_CONFIRMATION",
           "event": "customer_confirm",
           "allowed_roles": ["CUSTOMER"],
           "next_state": "PREPARING",
           "actions": [
-            { "type": "CREATE_RESERVATION" }
+            { "type": "CREATE_RESERVATION" },
+            { "type": "DISPATCH_EVENT", "event": "pay_online" }
           ]
         },
-
         {
-          "id": "OL-005",
+          "id": "OL-009",
           "label": "Start Preparing",
           "current_state": "PREPARING",
           "event": "start_preparing",
           "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
           "next_state": "PREPARING"
         },
-
         {
-          "id": "OL-005B",
-          "label": "Mark Order Ready for Pickup",
+          "id": "OL-010",
+          "label": "Mark Order Ready",
           "current_state": "PREPARING",
           "event": "mark_ready",
           "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
           "next_state": "READY_FOR_PICKUP",
           "actions": [
             { "type": "set_context", "path": "pickup.deadline", "value": "+48h" },
-            { "type": "DISPATCH_EVENT", "event": "activate_pickup" }
+            { "type": "set_context", "path": "pickup.otp_generated", "value": true }
           ]
         },
-
         {
-          "id": "OL-006",
-          "label": "Complete Order",
+          "id": "OL-011",
+          "label": "Complete Order (Verify OTP)",
           "current_state": "READY_FOR_PICKUP",
           "event": "complete_order",
-          "allowed_roles": ["SYSTEM"],
+          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
           "conditions": [
             {
-              "path": "states.PICKUP_VERIFICATION",
+              "path": "pickup.otp_verified",
               "operator": "equals",
-              "value": "HANDED_OVER"
+              "value": true
+            },
+            {
+              "path": "states.PAYMENT",
+              "operator": "equals",
+              "value": "PAID"
             }
           ],
           "validation_errors": {
-            "states.PICKUP_VERIFICATION": {
-              "code": "HANDOVER_REQUIRED",
+            "pickup.otp_verified": {
+              "code": "OTP_REQUIRED",
               "severity": "BLOCKING",
-              "message": "Medicine handover must be completed before order can be marked complete."
+              "message": "Pickup OTP code must be verified before completing the order."
+            },
+            "states.PAYMENT": {
+              "code": "PAYMENT_REQUIRED",
+              "severity": "BLOCKING",
+              "message": "Order must be PAID before completion."
             }
           },
-          "next_state": "COMPLETED"
+          "next_state": "COMPLETED",
+          "actions": [
+            { "type": "set_context", "path": "pickup.completed_at", "value": "now" }
+          ]
         },
-
         {
-          "id": "OL-007",
-          "label": "Pickup Window Expired",
+          "id": "OL-012",
+          "label": "Pickup Deadline Expired",
           "current_state": "READY_FOR_PICKUP",
           "event": "pickup_deadline_expired",
           "allowed_roles": ["SYSTEM"],
-          "next_state": "NOT_COLLECTED"
-        },
-
-        {
-          "id": "OL-008",
-          "label": "Reopen for Pickup Extension",
-          "current_state": "NOT_COLLECTED",
-          "event": "reopen_pickup",
-          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
-          "next_state": "READY_FOR_PICKUP",
-          "actions": [
-            { "type": "set_context", "path": "pickup.deadline", "value": "+48h" },
-            { "type": "DISPATCH_EVENT", "event": "activate_pickup" }
-          ]
-        },
-
-        {
-          "id": "OL-009",
-          "label": "Close Uncollected Order",
-          "current_state": "NOT_COLLECTED",
-          "event": "close_order",
-          "allowed_roles": ["SYSTEM"],
           "next_state": "CLOSED"
         },
-
         {
-          "id": "OL-010",
-          "label": "Cancel Submitted Order",
+          "id": "OL-013",
+          "label": "Cancel Order",
           "current_state": "SUBMITTED",
           "event": "cancel_order",
           "allowed_roles": ["CUSTOMER"],
           "next_state": "CANCELLED"
         },
-
         {
-          "id": "OL-011",
-          "label": "Cancel Order (With Reason)",
+          "id": "OL-013B",
+          "label": "Cancel Order",
+          "current_state": "PRESCRIPTION_VALIDATION",
+          "event": "cancel_order",
+          "allowed_roles": ["CUSTOMER", "PHARMACY_STAFF", "PHARMACIST"],
+          "next_state": "CANCELLED"
+        },
+        {
+          "id": "OL-014",
+          "label": "Cancel Order",
           "current_state": "WAITING_PHARMACY_CONFIRMATION",
           "event": "cancel_order",
           "allowed_roles": ["CUSTOMER", "PHARMACY_STAFF", "PHARMACIST"],
           "next_state": "CANCELLED"
         },
-
         {
-          "id": "OL-012",
+          "id": "OL-015",
           "label": "Cancel Order",
           "current_state": "WAITING_CUSTOMER_CONFIRMATION",
           "event": "cancel_order",
           "allowed_roles": ["CUSTOMER"],
           "next_state": "CANCELLED"
         },
-
         {
-          "id": "OL-013",
+          "id": "OL-016",
           "label": "Late Cancellation",
           "current_state": "PREPARING",
           "event": "cancel_order",
@@ -200,17 +224,14 @@
           "policy": {
             "warning": "Medicines already prepared. This is a late cancellation.",
             "track_metric": "late_cancellation",
-            "customer_notification": "Your order was already being prepared. Repeated late cancellations may require advance payment.",
-            "severity": "warning",
             "late_cancel": true
           },
           "actions": [
             { "type": "RELEASE_RESERVATION" }
           ]
         },
-
         {
-          "id": "OL-014",
+          "id": "OL-017",
           "label": "Late Cancellation (Ready)",
           "current_state": "READY_FOR_PICKUP",
           "event": "cancel_order",
@@ -218,161 +239,73 @@
           "next_state": "CANCELLED",
           "danger": true,
           "policy": {
-            "warning": "Medicines already packed and ready. This is a late cancellation.",
+            "warning": "Medicines already packed. This is a late cancellation.",
             "track_metric": "late_cancellation",
-            "customer_notification": "Your order was ready for pickup. Repeated late cancellations may result in restrictions.",
-            "severity": "warning",
             "late_cancel": true
           },
           "actions": [
             { "type": "RELEASE_RESERVATION" }
           ]
-        }
-      ]
-    },
-
-    "PRESCRIPTION_VALIDATION": {
-      "initial_state": "UPLOADED",
-      "terminal_states": ["APPROVED", "REJECTED"],
-      "states": [
-        { "id": "UPLOADED",                  "display_name": "Prescription Uploaded",       "color": "slate"   },
-        { "id": "VALIDATING",               "display_name": "Validating Prescription",     "color": "blue"    },
-        { "id": "AWAITING_PRESCRIPTION_UPLOAD", "display_name": "Awaiting Prescription Upload", "color": "amber"   },
-        { "id": "PHARMACIST_REVIEW",         "display_name": "Pharmacist Review",          "color": "purple"  },
-        { "id": "APPROVED",                  "display_name": "Approved",                   "color": "emerald" },
-        { "id": "REJECTED",                  "display_name": "Rejected",                   "color": "red"     }
-      ],
-      "transitions": [
+        },
         {
-          "id": "RX-001",
-          "label": "Start Validation",
-          "current_state": "UPLOADED",
-          "event": "start_validation",
-          "allowed_roles": ["SYSTEM"],
-          "next_state": "VALIDATING",
+          "id": "OL-018",
+          "label": "Report Issue",
+          "current_state": "COMPLETED",
+          "event": "report_issue",
+          "allowed_roles": ["CUSTOMER"],
+          "conditions": [
+            {
+              "path": "pickup.completed_at",
+              "operator": "within_hours",
+              "value": "issue_reporting_window_hours"
+            }
+          ],
+          "validation_errors": {
+            "pickup.completed_at": {
+              "code": "REPORTING_WINDOW_EXPIRED",
+              "severity": "BLOCKING",
+              "message": "The reporting window for this order has expired."
+            }
+          },
+          "next_state": "ISSUE_REPORTED"
+        },
+        {
+          "id": "OL-019",
+          "label": "Start Investigation",
+          "current_state": "ISSUE_REPORTED",
+          "event": "start_investigation",
+          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
+          "next_state": "UNDER_REVIEW"
+        },
+        {
+          "id": "OL-020",
+          "label": "Resolve Issue",
+          "current_state": "UNDER_REVIEW",
+          "event": "resolve_issue",
+          "allowed_roles": ["PHARMACIST", "ADMIN"],
+          "next_state": "RESOLVED",
           "actions": [
-            { "type": "DISPATCH_EVENT", "event": "route_to_pharmacist" },
-            { "type": "DISPATCH_EVENT", "event": "reject_unreadable" }
+            { "type": "CREATE_REPLACEMENT_ORDER" }
           ]
         },
         {
-          "id": "RX-002",
-          "label": "Route to Pharmacist",
-          "current_state": "VALIDATING",
-          "event": "route_to_pharmacist",
-          "allowed_roles": ["SYSTEM"],
-          "conditions": [
-            { "path": "prescription.clarity_score", "operator": "gte", "value": 20 }
-          ],
-          "validation_errors": {
-            "prescription.clarity_score": {
-              "code": "PRESCRIPTION_UNREADABLE",
-              "severity": "BLOCKING",
-              "message": "Prescription clarity score too low. Must be re-uploaded."
-            }
-          },
-          "next_state": "PHARMACIST_REVIEW"
-        },
-        {
-          "id": "RX-003",
-          "label": "Auto-Request Clearer (Unreadable)",
-          "current_state": "VALIDATING",
-          "event": "reject_unreadable",
-          "allowed_roles": ["SYSTEM"],
-          "conditions": [
-            { "path": "prescription.clarity_score", "operator": "lt", "value": 20 }
-          ],
-          "next_state": "AWAITING_PRESCRIPTION_UPLOAD"
-        },
-        {
-          "id": "RX-004",
-          "label": "Approve Prescription",
-          "current_state": "PHARMACIST_REVIEW",
-          "event": "approve_prescription",
-          "allowed_roles": ["PHARMACIST"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "not_in",
-              "value": ["CANCELLED", "CLOSED"]
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_CANCELLED_OR_CLOSED",
-              "severity": "BLOCKING",
-              "message": "Cannot approve prescription. The order is cancelled or closed."
-            }
-          },
-          "next_state": "APPROVED",
-          "actions": [
-            { "type": "DISPATCH_EVENT", "event": "notify_pharmacy" }
-          ]
-        },
-        {
-          "id": "RX-005",
-          "label": "Reject Prescription (With Reason)",
-          "current_state": "PHARMACIST_REVIEW",
-          "event": "reject_prescription",
-          "allowed_roles": ["PHARMACIST"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "not_in",
-              "value": ["CANCELLED", "CLOSED"]
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_CANCELLED_OR_CLOSED",
-              "severity": "BLOCKING",
-              "message": "Cannot reject prescription. The order is cancelled or closed."
-            }
-          },
+          "id": "OL-021",
+          "label": "Reject Claim",
+          "current_state": "UNDER_REVIEW",
+          "event": "reject_claim",
+          "allowed_roles": ["PHARMACIST", "ADMIN"],
           "next_state": "REJECTED"
         },
         {
-          "id": "RX-007",
-          "label": "Request Customer Clarification",
-          "current_state": "PHARMACIST_REVIEW",
-          "event": "request_clarification",
-          "allowed_roles": ["PHARMACIST"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "not_in",
-              "value": ["CANCELLED", "CLOSED"]
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_CANCELLED_OR_CLOSED",
-              "severity": "BLOCKING",
-              "message": "Cannot request clarification. The order is cancelled or closed."
-            }
-          },
-          "next_state": "PHARMACIST_REVIEW"
-        },
-        {
-          "id": "RX-006-A",
-          "label": "Re-upload Prescription",
-          "current_state": "AWAITING_PRESCRIPTION_UPLOAD",
-          "event": "reupload_prescription",
-          "allowed_roles": ["CUSTOMER"],
-          "next_state": "UPLOADED",
+          "id": "OL-022",
+          "label": "Reopen Pickup",
+          "current_state": "CLOSED",
+          "event": "reopen_pickup",
+          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
+          "next_state": "READY_FOR_PICKUP",
           "actions": [
-            { "type": "DISPATCH_EVENT", "event": "start_validation" }
-          ]
-        },
-        {
-          "id": "RX-006-B",
-          "label": "Re-upload Prescription",
-          "current_state": "REJECTED",
-          "event": "reupload_prescription",
-          "allowed_roles": ["CUSTOMER"],
-          "next_state": "UPLOADED",
-          "actions": [
-            { "type": "DISPATCH_EVENT", "event": "start_validation" }
+            { "type": "set_context", "path": "pickup.deadline", "value": "+48h" },
+            { "type": "set_context", "path": "pickup.otp_generated", "value": true }
           ]
         }
       ]
@@ -380,21 +313,19 @@
 
     "PAYMENT": {
       "initial_state": "UNPAID",
-      "terminal_states": ["PAID", "FAILED", "REFUNDED"],
+      "terminal_states": ["PAID", "REFUNDED"],
       "states": [
-        { "id": "UNPAID", "display_name": "Unpaid", "color": "amber" },
-        { "id": "PAYMENT_PENDING", "display_name": "Payment Pending", "color": "blue" },
-        { "id": "PAID", "display_name": "Paid", "color": "emerald" },
-        { "id": "FAILED", "display_name": "Failed", "color": "red" },
-        { "id": "REFUNDED", "display_name": "Refunded", "color": "gray" }
+        { "id": "UNPAID",   "display_name": "Unpaid",   "color": "slate" },
+        { "id": "PAID",     "display_name": "Paid",     "color": "green" },
+        { "id": "REFUNDED", "display_name": "Refunded", "color": "red" }
       ],
       "transitions": [
         {
-          "id": "PAY-001",
+          "id": "PM-001",
           "label": "Pay Online",
           "current_state": "UNPAID",
           "event": "pay_online",
-          "allowed_roles": ["CUSTOMER"],
+          "allowed_roles": ["CUSTOMER", "SYSTEM"],
           "conditions": [
             {
               "path": "states.ORDER_LIFECYCLE",
@@ -406,310 +337,18 @@
             "states.ORDER_LIFECYCLE": {
               "code": "PAYMENT_NOT_ALLOWED_YET",
               "severity": "BLOCKING",
-              "message": "Payment can only be made after the order has been confirmed by the customer."
+              "message": "Payment can only be made after stock is confirmed and checkout begins."
             }
           },
           "next_state": "PAID"
         },
         {
-          "id": "PAY-002",
-          "label": "Pay at Counter",
-          "current_state": "UNPAID",
-          "event": "pay_at_counter",
-          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "equals",
-              "value": "READY_FOR_PICKUP"
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_NOT_AT_PICKUP",
-              "severity": "BLOCKING",
-              "message": "Counter payment only allowed when order is ready for pickup."
-            }
-          },
-          "next_state": "PAID"
-        },
-        {
-          "id": "PAY-001B",
-          "label": "Begin Payment Processing",
-          "current_state": "UNPAID",
-          "event": "payment_pending",
-          "allowed_roles": ["SYSTEM"],
-          "next_state": "PAYMENT_PENDING"
-        },
-        {
-          "id": "PAY-002B",
-          "label": "Payment Failed",
-          "current_state": "PAYMENT_PENDING",
-          "event": "payment_failed",
-          "allowed_roles": ["SYSTEM"],
-          "priority": 10,
-          "next_state": "FAILED"
-        },
-
-        {
-          "id": "PAY-003",
-          "label": "Issue Refund",
-          "current_state": "PAID",
-          "event": "issue_refund",
-          "allowed_roles": ["SYSTEM", "PHARMACIST", "ADMIN"],
-          "conditions": [
-            {
-              "path": "states.ISSUE_MANAGEMENT",
-              "operator": "equals",
-              "value": "RESOLVED"
-            }
-          ],
-          "validation_errors": {
-            "states.ISSUE_MANAGEMENT": {
-              "code": "ISSUE_NOT_RESOLVED",
-              "severity": "BLOCKING",
-              "message": "Refund can only be issued after issue is marked RESOLVED."
-            }
-          },
-          "next_state": "REFUNDED"
-        },
-        {
-          "id": "PAY-004",
+          "id": "PM-002",
           "label": "Refund Payment",
           "current_state": "PAID",
           "event": "refund_payment",
-          "allowed_roles": ["SYSTEM", "PHARMACIST", "ADMIN"],
-          "conditions": [
-            {
-              "path": "refund_authorized",
-              "operator": "equals",
-              "value": true
-            }
-          ],
-          "validation_errors": {
-            "refund_authorized": {
-              "code": "REFUND_NOT_AUTHORIZED",
-              "severity": "BLOCKING",
-              "message": "Refund has not been authorized by the policy engine or a supervisor."
-            }
-          },
+          "allowed_roles": ["SYSTEM"],
           "next_state": "REFUNDED"
-        }
-      ]
-    },
-
-    "PICKUP_VERIFICATION": {
-      "initial_state": "WAITING_FOR_PICKUP",
-      "terminal_states": ["HANDED_OVER"],
-      "states": [
-        { "id": "WAITING_FOR_PICKUP", "display_name": "Waiting for Pickup", "color": "gray" },
-        { "id": "OTP_AVAILABLE", "display_name": "OTP Available", "color": "blue" },
-        { "id": "OTP_VERIFIED", "display_name": "OTP Verified", "color": "orange" },
-        { "id": "HANDED_OVER", "display_name": "Handed Over", "color": "emerald" }
-      ],
-      "transitions": [
-        {
-          "id": "PK-001",
-          "label": "Generate OTP",
-          "current_state": "WAITING_FOR_PICKUP",
-          "event": "activate_pickup",
-          "allowed_roles": ["SYSTEM"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "equals",
-              "value": "READY_FOR_PICKUP"
-            }
-          ],
-          "next_state": "OTP_AVAILABLE"
-        },
-        {
-          "id": "PK-001B",
-          "label": "Regenerate OTP",
-          "current_state": "OTP_AVAILABLE",
-          "event": "activate_pickup",
-          "allowed_roles": ["SYSTEM"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "equals",
-              "value": "READY_FOR_PICKUP"
-            }
-          ],
-          "next_state": "OTP_AVAILABLE"
-        },
-        {
-          "id": "PK-002",
-          "label": "Verify OTP",
-          "current_state": "OTP_AVAILABLE",
-          "event": "verify_otp",
-          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "not_in",
-              "value": ["CANCELLED", "CLOSED", "NOT_COLLECTED"]
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_NOT_ACTIVE",
-              "severity": "BLOCKING",
-              "message": "Cannot verify OTP. The order has been cancelled or closed."
-            }
-          },
-          "next_state": "OTP_VERIFIED"
-        },
-        {
-          "id": "PK-003",
-          "label": "Complete Handover",
-          "current_state": "OTP_VERIFIED",
-          "event": "complete_handover",
-          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "not_in",
-              "value": ["CANCELLED", "CLOSED", "NOT_COLLECTED"]
-            },
-            {
-              "path": "states.PAYMENT",
-              "operator": "equals",
-              "value": "PAID"
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_NOT_ACTIVE",
-              "severity": "BLOCKING",
-              "message": "Cannot complete handover. The order has been cancelled or closed."
-            },
-            "states.PAYMENT": {
-              "code": "PAYMENT_REQUIRED",
-              "severity": "BLOCKING",
-              "message": "Payment must be completed before medicine can be handed over."
-            }
-          },
-          "next_state": "HANDED_OVER",
-          "actions": [
-            { "type": "DISPATCH_EVENT", "event": "complete_order" }
-          ]
-        }
-      ]
-    },
-
-    "ISSUE_MANAGEMENT": {
-      "initial_state": "NO_ISSUE",
-      "terminal_states": ["RESOLVED", "REJECTED"],
-      "states": [
-        { "id": "NO_ISSUE",       "display_name": "No Issue",       "color": "slate"   },
-        { "id": "ISSUE_REPORTED", "display_name": "Issue Reported", "color": "orange"  },
-        { "id": "UNDER_REVIEW",   "display_name": "Under Review",   "color": "blue"    },
-        { "id": "RESOLVED",       "display_name": "Resolved",       "color": "emerald" },
-        { "id": "REJECTED",       "display_name": "Claim Rejected", "color": "red"     }
-      ],
-      "transitions": [
-        {
-          "id": "IM-001",
-          "label": "Report Issue",
-          "current_state": "NO_ISSUE",
-          "event": "report_issue",
-          "allowed_roles": ["CUSTOMER"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "equals",
-              "value": "COMPLETED"
-            },
-            {
-              "path": "pickup.completed_at",
-              "operator": "within_hours",
-              "value": "issue_reporting_window_hours"
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_NOT_COMPLETED",
-              "severity": "BLOCKING",
-              "message": "Issues can only be reported after an order is completed."
-            },
-            "pickup.completed_at": {
-              "code": "REPORTING_WINDOW_EXPIRED",
-              "severity": "BLOCKING",
-              "message": "The reporting window for this order has expired."
-            }
-          },
-          "next_state": "ISSUE_REPORTED"
-        },
-        {
-          "id": "IM-002",
-          "label": "Start Investigation",
-          "current_state": "ISSUE_REPORTED",
-          "event": "start_investigation",
-          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "equals",
-              "value": "COMPLETED"
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_NOT_COMPLETED",
-              "severity": "BLOCKING",
-              "message": "Issue investigation is only valid on completed orders."
-            }
-          },
-          "next_state": "UNDER_REVIEW"
-        },
-        {
-          "id": "IM-003",
-          "label": "Resolve Issue",
-          "current_state": "UNDER_REVIEW",
-          "event": "resolve_issue",
-          "allowed_roles": ["PHARMACIST", "ADMIN"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "equals",
-              "value": "COMPLETED"
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_NOT_COMPLETED",
-              "severity": "BLOCKING",
-              "message": "Issue resolution is only valid on completed orders."
-            }
-          },
-          "next_state": "RESOLVED",
-          "actions": [
-            { "type": "CREATE_REPLACEMENT_ORDER" }
-          ]
-        },
-
-        {
-          "id": "IM-004",
-          "label": "Reject Claim",
-          "current_state": "UNDER_REVIEW",
-          "event": "reject_claim",
-          "allowed_roles": ["PHARMACIST", "ADMIN"],
-          "conditions": [
-            {
-              "path": "states.ORDER_LIFECYCLE",
-              "operator": "equals",
-              "value": "COMPLETED"
-            }
-          ],
-          "validation_errors": {
-            "states.ORDER_LIFECYCLE": {
-              "code": "ORDER_NOT_COMPLETED",
-              "severity": "BLOCKING",
-              "message": "Claim rejection is only valid on completed orders."
-            }
-          },
-          "next_state": "REJECTED"
         }
       ]
     }

@@ -30,10 +30,7 @@ def create_order(store, order_id, has_prescription=False, prescription_status="N
         states = {
             "ORDER_LIFECYCLE": "DRAFT",
             "PAYMENT": "UNPAID",
-            "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-            "ISSUE_MANAGEMENT": "NO_ISSUE"
         }
-    # Clean None values
     states = {k: v for k, v in states.items() if v is not None}
     
     store[order_id] = {
@@ -75,9 +72,6 @@ def test_otc_order_success(services):
     create_order(store, "ORD-1")
     
     osvc.execute_order_event_sync("ORD-1", "submit_order", "CUSTOMER", "R1")
-    assert store["ORD-1"]["states"]["ORDER_LIFECYCLE"] == "SUBMITTED"
-    
-    osvc.execute_order_event_sync("ORD-1", "notify_pharmacy", "SYSTEM", "R2")
     assert store["ORD-1"]["states"]["ORDER_LIFECYCLE"] == "WAITING_PHARMACY_CONFIRMATION"
     
     osvc.execute_order_event_sync("ORD-1", "pharmacy_confirm", "PHARMACY_STAFF", "R3")
@@ -89,59 +83,44 @@ def test_otc_order_success(services):
     osvc.execute_order_event_sync("ORD-1", "start_preparing", "PHARMACY_STAFF", "R5")
     assert store["ORD-1"]["states"]["ORDER_LIFECYCLE"] == "PREPARING"
 
-# 2. Prescription order success (old flow updated)
+# 2. Prescription order success
 def test_prescription_order_success(services):
     osvc, store = services
     create_order(store, "ORD-2", has_prescription=True, prescription_status="PENDING")
     store["ORD-2"]["context"]["prescription"]["clarity_score"] = 90
     osvc.execute_order_event_sync("ORD-2", "submit_order", "CUSTOMER", "R0")
-    osvc.execute_order_event_sync("ORD-2", "start_validation", "SYSTEM", "R1")
-    # Simulate routing to pharmacist
-    osvc.execute_order_event_sync("ORD-2", "route_to_pharmacist", "SYSTEM", "R2")
-    assert store["ORD-2"]["states"]["PRESCRIPTION_VALIDATION"] == "PHARMACIST_REVIEW"
+    
+    assert store["ORD-2"]["states"]["ORDER_LIFECYCLE"] == "PRESCRIPTION_VALIDATION"
     
     # Direct approval from review
     osvc.execute_order_event_sync("ORD-2", "approve_prescription", "PHARMACIST", "R5")
-    assert store["ORD-2"]["states"]["PRESCRIPTION_VALIDATION"] == "APPROVED"
+    assert store["ORD-2"]["states"]["ORDER_LIFECYCLE"] == "WAITING_PHARMACY_CONFIRMATION"
 
-# 7. Customer removes item (skip - tests context update via API)
+# 3. Customer cancels order
 def test_customer_cancels_order(services):
     osvc, store = services
-    create_order(store, "ORD-7", states={"ORDER_LIFECYCLE": "WAITING_PHARMACY_CONFIRMATION", "PAYMENT": "UNPAID", "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP", "ISSUE_MANAGEMENT": "NO_ISSUE"})
+    create_order(store, "ORD-7", states={"ORDER_LIFECYCLE": "WAITING_PHARMACY_CONFIRMATION", "PAYMENT": "UNPAID"})
     
     osvc.execute_order_event_sync("ORD-7", "cancel_order", "CUSTOMER", "R1")
     assert store["ORD-7"]["states"]["ORDER_LIFECYCLE"] == "CANCELLED"
 
-# 8. Payment failure
-def test_payment_failure(services):
-    osvc, store = services
-    create_order(store, "ORD-8", states={"PAYMENT": "PAYMENT_PENDING", "ORDER_LIFECYCLE": "DRAFT", "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP", "ISSUE_MANAGEMENT": "NO_ISSUE"})
-    
-    osvc.execute_order_event_sync("ORD-8", "payment_failed", "SYSTEM", "R1")
-    assert store["ORD-8"]["states"]["PAYMENT"] == "FAILED"
-
-# 10. Successful pickup
+# 4. Successful pickup
 def test_successful_pickup(services):
     osvc, store = services
-    create_order(store, "ORD-10", payment_status="PAID", states={"ORDER_LIFECYCLE": "READY_FOR_PICKUP", "PAYMENT": "PAID", "PICKUP_VERIFICATION": "OTP_VERIFIED", "ISSUE_MANAGEMENT": "NO_ISSUE"})
+    create_order(store, "ORD-10", payment_status="PAID", states={"ORDER_LIFECYCLE": "READY_FOR_PICKUP", "PAYMENT": "PAID"})
+    store["ORD-10"]["context"]["pickup"]["otp_verified"] = True
     
-    osvc.execute_order_event_sync("ORD-10", "complete_handover", "PHARMACY_STAFF", "R1")
-    assert store["ORD-10"]["states"]["PICKUP_VERIFICATION"] == "HANDED_OVER"
-    
-    osvc.execute_order_event_sync("ORD-10", "complete_order", "SYSTEM", "R2")
+    osvc.execute_order_event_sync("ORD-10", "complete_order", "PHARMACY_STAFF", "R1")
     assert store["ORD-10"]["states"]["ORDER_LIFECYCLE"] == "COMPLETED"
 
-
-# BUG-002 regression: reopen_pickup must regenerate OTP via PK-001B
+# 5. reopen_pickup must regenerate OTP
 def test_reopen_pickup_regenerates_otp(services):
     osvc, store = services
 
-    # Order that timed out: OTP was generated but not used
+    # Order that timed out
     create_order(store, "ORD-BUG002", payment_status="PAID", states={
-        "ORDER_LIFECYCLE": "NOT_COLLECTED",
+        "ORDER_LIFECYCLE": "CLOSED",
         "PAYMENT": "PAID",
-        "PICKUP_VERIFICATION": "READY_FOR_PICKUP",
-        "ISSUE_MANAGEMENT": "NO_ISSUE"
     })
 
     # Pharmacy staff reopens the order
@@ -156,40 +135,51 @@ def test_reopen_pickup_regenerates_otp(services):
     # Run the actions locally so set_context can populate the deadline in the store
     osvc.action_executor.execute("ORD-BUG002", actions, audit_id)
 
-    store["ORD-BUG002"]["states"]["PICKUP_VERIFICATION"] = "READY_FOR_PICKUP"
-    assert store["ORD-BUG002"]["states"]["PICKUP_VERIFICATION"] == "READY_FOR_PICKUP"
-
     # A fresh pickup deadline must have been written to context by the set_context action
     deadline = store["ORD-BUG002"].get("context", {}).get("pickup", {}).get("deadline")
     assert deadline is not None, "A fresh pickup.deadline must be set on reopen"
 
-
-# Industry-Level Test: Pharmacy Error Return & Replacement Order Creation
+# 6. Pharmacy Error Return & Replacement Order Creation
 def test_pharmacy_error_replacement_order(services):
     osvc, store = services
     order_id = "ORD-PHARM-ERR"
 
-    # Step 0: Completed & handed over order with issue under review
+    # Step 0: Completed order
     create_order(store, order_id, payment_status="PAID", states={
         "ORDER_LIFECYCLE": "COMPLETED",
         "PAYMENT": "PAID",
-        "PICKUP_VERIFICATION": "HANDED_OVER",
-        "ISSUE_MANAGEMENT": "UNDER_REVIEW"
     })
+    from datetime import datetime
+    store[order_id]["context"]["pickup"]["completed_at"] = datetime.now().isoformat()
+    store[order_id]["context"]["issue_reporting_window_hours"] = 48
 
-    # Step 1: Pharmacist resolves the issue
+    # Step 1: Customer reports issue
+    result, errors, actions, audit_id = osvc.execute_order_event_sync(
+        order_id, "report_issue", "CUSTOMER", "REQ-IM-1"
+    )
+    assert not errors, f"report_issue failed: {errors}"
+    assert store[order_id]["states"]["ORDER_LIFECYCLE"] == "ISSUE_REPORTED"
+
+    # Step 2: Pharmacy staff starts investigation
+    result, errors, actions, audit_id = osvc.execute_order_event_sync(
+        order_id, "start_investigation", "PHARMACY_STAFF", "REQ-IM-2"
+    )
+    assert not errors, f"start_investigation failed: {errors}"
+    assert store[order_id]["states"]["ORDER_LIFECYCLE"] == "UNDER_REVIEW"
+
+    # Step 3: Pharmacist resolves the issue
     result, errors, actions, audit_id = osvc.execute_order_event_sync(
         order_id, "resolve_issue", "PHARMACIST", "REQ-RES-1"
     )
     assert not errors, f"resolve_issue failed: {errors}"
     assert result["new_state"] == "RESOLVED"
 
-    # Step 2: Execute actions (simulating background action execution)
+    # Step 4: Execute actions (simulating background action execution)
     from services.action_executor import ActionExecutor
     executor = ActionExecutor(store, None)
     action_results = executor.execute(order_id, actions, audit_id)
 
-    # Step 3: Verify replacement order was created
+    # Step 5: Verify replacement order was created
     original_order = store[order_id]
     assert "replacement_order_id" in original_order, "Original order must reference replacement_order_id"
     repl_id = original_order["replacement_order_id"]
@@ -198,5 +188,3 @@ def test_pharmacy_error_replacement_order(services):
     assert replacement_order["parent_order_id"] == order_id, "Replacement order must point back to parent_order_id"
     assert replacement_order["states"]["ORDER_LIFECYCLE"] == "PREPARING", "Replacement order starts in PREPARING"
     assert replacement_order["states"]["PAYMENT"] == "PAID", "Replacement order is marked PAID ($0.00 due)"
-    assert replacement_order["states"]["PICKUP_VERIFICATION"] == "WAITING_FOR_PICKUP", "Replacement order has fresh OTP cycle"
-

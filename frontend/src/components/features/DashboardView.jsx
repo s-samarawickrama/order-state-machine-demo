@@ -63,7 +63,7 @@ export default function DashboardView({
               <div className="flex-1 space-y-2">
                 <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
                   <span>Prescription clarity score: <strong className="text-indigo-400 font-mono text-sm">{demoScore}%</strong></span>
-                  <span className="text-zinc-500">Rx State: <strong className="text-white">{order?.states?.PRESCRIPTION_VALIDATION}</strong></span>
+                  <span className="text-zinc-500">Rx State: <strong className="text-white">{order?.states?.ORDER_LIFECYCLE}</strong></span>
                 </div>
                 <input
                   type="range"
@@ -86,7 +86,7 @@ export default function DashboardView({
                 <Button onClick={handleSaveDemoScore} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow">
                   Save & Process Score
                 </Button>
-                {order?.states?.PRESCRIPTION_VALIDATION === "PHARMACIST_REVIEW" && activeRole !== "PHARMACIST" && (
+                {order?.states?.ORDER_LIFECYCLE === "PRESCRIPTION_VALIDATION" && activeRole !== "PHARMACIST" && (
                   <Button variant="default" onClick={() => onRoleChange?.("PHARMACIST")} className="bg-amber-600 hover:bg-amber-700 text-white font-semibold">
                     Switch to Pharmacist to Review
                   </Button>

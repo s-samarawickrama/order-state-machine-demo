@@ -91,7 +91,7 @@ export default function AppShell({
               )}
             </div>
             <div className="flex items-center gap-3">
-              {order?.states?.PRESCRIPTION_VALIDATION === "PHARMACIST_REVIEW" && activeRole !== "PHARMACIST" && (
+              {order?.states?.ORDER_LIFECYCLE === "PRESCRIPTION_VALIDATION" && activeRole !== "PHARMACIST" && (
                 <button
                   onClick={() => onRoleChange("PHARMACIST")}
                   className="px-3 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 text-xs font-semibold rounded-md animate-pulse flex items-center gap-1.5 transition"

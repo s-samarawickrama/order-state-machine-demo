@@ -67,12 +67,12 @@ class ActionExecutor:
                     # For example, marking an order ready can dispatch the 'request_pickup_otp' event automatically.
                     event_to_dispatch = action.get("event")
                     if order and event_to_dispatch:
-                        from api.dependencies import order_service
-                        # We must dispatch this asynchronously or directly if we have the service.
-                        # For simplicity in this executor, we can just invoke the order_service sync method.
+                        svc = getattr(self, "order_service", None)
+                        if not svc:
+                            from api.dependencies import order_service as svc
                         try:
                             # Use SYSTEM role for automatic internal dispatches
-                            order_service.execute_order_event_sync(
+                            svc.execute_order_event_sync(
                                 order_id=order_id, 
                                 event=event_to_dispatch, 
                                 role_claim="SYSTEM", 
@@ -93,9 +93,7 @@ class ActionExecutor:
                             "is_replacement": True,
                             "states": {
                                 "ORDER_LIFECYCLE": "PREPARING",
-                                "PAYMENT": "PAID",
-                                "PICKUP_VERIFICATION": "WAITING_FOR_PICKUP",
-                                "ISSUE_MANAGEMENT": "NO_ISSUE"
+                                "PAYMENT": "PAID"
                             },
                             "customer_id": order.get("customer_id", "CUS-001"),
                             "chat_messages": [],

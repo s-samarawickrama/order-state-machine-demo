@@ -123,7 +123,7 @@ export default function ContextEditor({ order, onUpdateContext }) {
             />
           </div>
           <div className="text-[10px] text-zinc-500">
-            For PICKUP_VERIFICATION. OTP must be verified before performing the handover action.
+            OTP verification check. The OTP must be verified before completing the order pickup.
           </div>
         </div>
 

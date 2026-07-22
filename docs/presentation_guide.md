@@ -1,4 +1,4 @@
-# MediPick Backend Demo Guide
+# MediPick Backend Demo Guide (2-FSM Version)
 
 This guide is meant for live presentation. It shows how to explain the backend workflow engine, the JSON-driven configuration model, and the frontend demo experience in a simple sequence.
 
@@ -14,13 +14,10 @@ That means the same backend can support many scenarios by changing configuration
 
 ## 2. What the config contains
 
-The config defines five workflows:
+The config defines two workflows:
 
 - ORDER_LIFECYCLE
-- PRESCRIPTION_VALIDATION
 - PAYMENT
-- PICKUP_VERIFICATION
-- ISSUE_MANAGEMENT
 
 Each workflow contains:
 
@@ -35,7 +32,7 @@ A transition looks like this conceptually:
 
 ```json
 {
-  "current_state": "SUBMITTED",
+  "current_state": "DRAFT",
   "event": "submit_order",
   "allowed_roles": ["CUSTOMER"],
   "next_state": "SUBMITTED"
@@ -49,7 +46,7 @@ The engine reads these definitions at runtime and decides whether a transition i
 1. The frontend sends an event to the backend.
 2. The order service builds the evaluation context.
 3. The workflow engine checks the current workflow state and the event.
-4. It evaluates conditions such as role permission, payment state, or prescription approval.
+4. It evaluates conditions such as role permission, payment state, or OTP verification.
 5. If valid, it commits the next state and dispatches any side effects.
 
 ## 4. Presentation demo flow
@@ -66,9 +63,9 @@ The engine reads these definitions at runtime and decides whether a transition i
 
 - Load the prescription scenario.
 - Submit the order.
-- Show that the prescription workflow is now active.
-- Use PHARMACY_STAFF or PHARMACIST to advance the validation state.
-- Approve the prescription and continue the rest of the lifecycle.
+- Show that the prescription validation state is now active within `ORDER_LIFECYCLE`.
+- Switch to PHARMACIST to review and approve the prescription.
+- Continue the rest of the lifecycle.
 
 ### Scenario C — Payment gate
 
@@ -79,46 +76,20 @@ The engine reads these definitions at runtime and decides whether a transition i
 ### Scenario D — Handover and completion
 
 - Move the order to ready-for-pickup.
-- Verify OTP.
-- Complete handover only when payment is paid.
-- The order then flows into completion.
+- Verify OTP (updates context metadata).
+- Complete handover (transitions to `COMPLETED`) only when payment is paid and OTP is verified.
 
 ### Scenario E — Post-collection issue
 
 - Load the issue scenario.
-- Show issue reporting and investigation.
-- Resolve the issue and observe the replacement-order path.
+- Show issue reporting (transitions to `ISSUE_REPORTED`) and investigation (transitions to `UNDER_REVIEW`).
+- Resolve the issue (transitions to `RESOLVED`) as pharmacist and observe the automatic creation of a replacement order in the audit logs.
 
 ## 5. How to present the frontend
 
 Open the app and explain the four main panels:
 
 - Scenario selector: choose a prebuilt scenario.
-- Workflow monitor: see all FSM states at a glance.
+- Workflow monitor: see all active FSM states at a glance.
 - Workflow graph: inspect the active state machine.
 - Action panel: see which actions are allowed or blocked.
-
-The important message is that the UI is a thin presenter over the backend state machine.
-
-## 6. How to teach this live
-
-Use this simple script:
-
-- "This is a config-driven backend. Nothing is hardcoded in Python for every rule."
-- "The config says what states exist, what transitions are allowed, and what conditions gate them."
-- "The frontend simply calls the backend and shows the result."
-- "If I want to change the business rule, I change the JSON configuration rather than rewriting Python logic."
-
-## 7. Suggested demo commands
-
-Run the backend:
-
-```bash
-uvicorn main:app --reload
-```
-
-Run the frontend:
-
-```bash
-npm run dev -- --host 127.0.0.1 --port 5173
-```

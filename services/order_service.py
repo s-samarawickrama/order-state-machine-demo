@@ -11,6 +11,7 @@ class OrderService:
         self.store = store
         self.audit_service = audit_service
         self.action_executor = action_executor or ActionExecutor(store, audit_service)
+        self.action_executor.order_service = self
         self.policy_engine = policy_engine or PolicyEngine()
 
     def _compute_derived_context(self, order: Dict[str, Any], evaluation_context: Dict[str, Any]) -> None:
@@ -43,10 +44,6 @@ class OrderService:
         order = self.store.get(order_id)
         if not order:
             raise LookupError(f"Order {order_id} not found.")
-
-        # Initialize prescription validation for prescription-based orders using the spec state machine.
-        if event == "submit_order" and order.get("order_type") in ("PRESCRIPTION", "MIXED"):
-            order.setdefault("states", {})["PRESCRIPTION_VALIDATION"] = "UPLOADED"
 
         if context_updates:
             self._apply_updates(order["context"], context_updates)
@@ -114,7 +111,7 @@ class OrderService:
                 except Exception:
                     pass
 
-        elif event == "resolve_issue" and wf_name == "ISSUE_MANAGEMENT" and next_state == "RESOLVED":
+        elif event == "resolve_issue" and wf_name == "ORDER_LIFECYCLE" and next_state == "RESOLVED":
             policy_res = self.policy_engine.evaluate_issue_resolution(order)
             order.setdefault("context", {})["refund_authorized"] = policy_res.get("refund_authorized", True)
             if order["states"].get("PAYMENT") == "PAID":

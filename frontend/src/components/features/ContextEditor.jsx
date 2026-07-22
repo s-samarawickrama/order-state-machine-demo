@@ -18,6 +18,7 @@ export default function ContextEditor({ order, onUpdateContext }) {
   const [isSpecialItem, setIsSpecialItem] = useState(false);
   const [issueReportingWindowHours, setIssueReportingWindowHours] = useState(48);
   const [completedAt, setCompletedAt] = useState("");
+  const [acceptSubstitutes, setAcceptSubstitutes] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   // Sync local state when order changes
@@ -33,6 +34,7 @@ export default function ContextEditor({ order, onUpdateContext }) {
     setIsSpecialItem(order.context?.is_special_item ?? false);
     setIssueReportingWindowHours(order.context?.issue_reporting_window_hours ?? 48);
     setCompletedAt(order.context?.pickup?.completed_at ?? "");
+    setAcceptSubstitutes(order.context?.preferences?.accept_substitutes ?? false);
   }, [order]);
 
   const handleSave = async () => {
@@ -51,6 +53,9 @@ export default function ContextEditor({ order, onUpdateContext }) {
         no_show_count: Number(noShowCount),
         is_special_item: isSpecialItem,
         issue_reporting_window_hours: Number(issueReportingWindowHours),
+        preferences: {
+          accept_substitutes: acceptSubstitutes,
+        },
       };
       await onUpdateContext(contextUpdates);
     } finally {
@@ -180,6 +185,25 @@ export default function ContextEditor({ order, onUpdateContext }) {
           <div className="text-[10px] text-zinc-500">
             Controls medicine catalogue state. In STOCK_CHECK, a stock check action evaluates this
             value to route to Quote Ready/Partial Quote/Unavailable.
+          </div>
+        </div>
+
+        {/* Customer Preferences */}
+        <div className="space-y-3 bg-zinc-950 p-4 rounded-lg border border-zinc-800">
+          <label className="text-xs font-bold text-zinc-300 uppercase tracking-wide block">
+            Customer Checkout Preferences
+          </label>
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-xs text-zinc-400">Accept Brand Substitutes</span>
+            <input
+              type="checkbox"
+              checked={acceptSubstitutes}
+              onChange={(e) => setAcceptSubstitutes(e.target.checked)}
+              className="accent-indigo-500 rounded bg-zinc-800 border-zinc-700 h-4 w-4"
+            />
+          </div>
+          <div className="text-[10px] text-zinc-500">
+            Indicates whether the customer has authorized the pharmacy to automatically replace out-of-stock items with equivalent substitutes.
           </div>
         </div>
       </div>

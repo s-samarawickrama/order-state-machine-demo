@@ -32,6 +32,9 @@ def _base_order(order_id: str, order_type: str, items: list, include_prescriptio
             },
             "availability": {
                 "status": "AVAILABLE"
+            },
+            "preferences": {
+                "accept_substitutes": False
             }
         },
         "order_items": items,
@@ -149,14 +152,14 @@ SCENARIOS = {
         "include_prescription": False,
         "overrides": {
             "states": {
-                "ORDER_LIFECYCLE": "COLLECTED",
+                "ORDER_LIFECYCLE": "COMPLETED",
                 "PAYMENT": "PAID",
                 "PICKUP_VERIFICATION": "COLLECTED",
                 "ISSUE_MANAGEMENT": "ISSUE_REPORTED"
             }
         },
         "summary": "Open the issue-management workflow post-collection for a customer complaint.",
-        "starting_state": "COLLECTED",
+        "starting_state": "COMPLETED",
         "role_hint": "CUSTOMER",
         "demo_steps": [
             "Load the scenario and inspect the issue state.",
@@ -171,14 +174,14 @@ SCENARIOS = {
         "include_prescription": False,
         "overrides": {
             "states": {
-                "ORDER_LIFECYCLE": "COLLECTED",
+                "ORDER_LIFECYCLE": "COMPLETED",
                 "PAYMENT": "PAID",
                 "PICKUP_VERIFICATION": "COLLECTED",
                 "ISSUE_MANAGEMENT": "UNDER_REVIEW"
             }
         },
         "summary": "Show the pharmacist review and replacement-order path for a pharmacy error case.",
-        "starting_state": "COLLECTED",
+        "starting_state": "COMPLETED",
         "role_hint": "PHARMACIST",
         "demo_steps": [
             "Load the scenario and inspect the review state.",

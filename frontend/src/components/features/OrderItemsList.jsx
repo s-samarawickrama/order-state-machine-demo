@@ -27,10 +27,21 @@ export default function OrderItemsList({ order, onUpdateItemAvailability }) {
 
   return (
     <Card className="bg-zinc-900 border-zinc-800">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-sm font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
           <Box size={16} /> Pharmacy Items Catalogue & Checkout Checklist
         </CardTitle>
+        {order.context?.preferences && (
+          <Badge
+            className={
+              order.context.preferences.accept_substitutes
+                ? "bg-green-950/40 text-green-400 border border-green-900"
+                : "bg-amber-950/40 text-amber-400 border border-amber-900"
+            }
+          >
+            Accepts Substitutes: {order.context.preferences.accept_substitutes ? "YES" : "NO"}
+          </Badge>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-3">

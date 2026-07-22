@@ -71,7 +71,7 @@ def test_handover_requires_otp_and_payment():
 
     decision, errors = engine.execute_transition_with_reasons(
         current_states=current_states,
-        event="complete_order",
+        event="complete_handover",
         workflow_context=context,
     )
 

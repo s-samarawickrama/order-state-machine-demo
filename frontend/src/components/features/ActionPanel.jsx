@@ -10,7 +10,10 @@ import { Badge } from "@/components/ui/badge";
  */
 export default function ActionPanel({ order, activeRole, onExecuteTransition, onRoleChange }) {
   // Only display actions that are currently allowed and valid in this state.
-  const availableActions = order?.available_actions?.filter((a) => a.allowed);
+  // System-only actions are auto-dispatched by the engine — not shown to human roles.
+  const availableActions = order?.available_actions?.filter(
+    (a) => a.allowed && !a.allowed_roles?.every((r) => r === "SYSTEM")
+  );
 
   return (
     <Card className="bg-zinc-900 border-zinc-800 h-[600px] flex flex-col">

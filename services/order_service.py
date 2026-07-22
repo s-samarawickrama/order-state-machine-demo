@@ -31,6 +31,7 @@ class OrderService:
         evaluation_context.setdefault("prescription", {"status": "NOT_REQUIRED"})
         evaluation_context.setdefault("payment", {"status": "UNPAID"})
         evaluation_context.setdefault("pickup", {"otp_verified": False})
+        evaluation_context.setdefault("issue_reporting_window_hours", 48)
         evaluation_context["states"] = order.get("states", {})
 
     def execute_order_event_sync(

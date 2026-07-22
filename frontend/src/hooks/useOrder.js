@@ -60,11 +60,14 @@ export function useOrder() {
     async (event, contextUpdates = null) => {
       if (!order) return;
       try {
+        // Only send contextUpdates if explicitly provided.
+        // Sending order.context unconditionally overwrites backend-managed
+        // set_context action results (e.g. pickup.otp_verified, pickup.otp_generated).
         const json = await apiExecuteTransition(
           order.order_id,
           event,
           activeRole,
-          contextUpdates || order.context
+          contextUpdates  // null = backend keeps its own stored context
         );
         if (json.success) {
           await refetchOrder();

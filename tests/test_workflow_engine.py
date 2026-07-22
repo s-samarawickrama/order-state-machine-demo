@@ -110,7 +110,7 @@ def test_successful_pickup(services):
     create_order(store, "ORD-10", payment_status="PAID", states={"ORDER_LIFECYCLE": "READY_FOR_PICKUP", "PAYMENT": "PAID"})
     store["ORD-10"]["context"]["pickup"]["otp_verified"] = True
     
-    osvc.execute_order_event_sync("ORD-10", "complete_order", "PHARMACY_STAFF", "R1")
+    osvc.execute_order_event_sync("ORD-10", "complete_handover", "PHARMACY_STAFF", "R1")
     assert store["ORD-10"]["states"]["ORDER_LIFECYCLE"] == "COMPLETED"
 
 # 5. reopen_pickup must regenerate OTP

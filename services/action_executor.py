@@ -144,6 +144,8 @@ class ActionExecutor:
                             from datetime import timedelta
                             hours = int(value[1:-1])
                             value = (datetime.now() + timedelta(hours=hours)).isoformat()
+                        elif value == "now":
+                            value = datetime.now().isoformat()
                             
                         if isinstance(current, dict):
                             current[keys[-1]] = value

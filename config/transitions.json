@@ -114,8 +114,7 @@
           "allowed_roles": ["CUSTOMER"],
           "next_state": "PREPARING",
           "actions": [
-            { "type": "CREATE_RESERVATION" },
-            { "type": "DISPATCH_EVENT", "event": "pay_online" }
+            { "type": "CREATE_RESERVATION" }
           ]
         },
         {
@@ -140,9 +139,9 @@
         },
         {
           "id": "OL-011",
-          "label": "Complete Order (Verify OTP)",
+          "label": "Complete Handover",
           "current_state": "READY_FOR_PICKUP",
-          "event": "complete_order",
+          "event": "complete_handover",
           "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
           "conditions": [
             {
@@ -171,6 +170,41 @@
           "next_state": "COMPLETED",
           "actions": [
             { "type": "set_context", "path": "pickup.completed_at", "value": "now" }
+          ]
+        },
+        {
+          "id": "OL-011B",
+          "label": "Verify OTP",
+          "current_state": "READY_FOR_PICKUP",
+          "event": "verify_otp",
+          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
+          "conditions": [
+            {
+              "path": "pickup.otp_generated",
+              "operator": "equals",
+              "value": true
+            },
+            {
+              "path": "pickup.otp_verified",
+              "operator": "equals",
+              "value": false
+            }
+          ],
+          "validation_errors": {
+            "pickup.otp_generated": {
+              "code": "OTP_NOT_GENERATED",
+              "severity": "BLOCKING",
+              "message": "OTP has not been generated for this order yet."
+            },
+            "pickup.otp_verified": {
+              "code": "OTP_ALREADY_VERIFIED",
+              "severity": "BLOCKING",
+              "message": "OTP has already been verified for this order."
+            }
+          },
+          "next_state": "READY_FOR_PICKUP",
+          "actions": [
+            { "type": "set_context", "path": "pickup.otp_verified", "value": true }
           ]
         },
         {
@@ -344,6 +378,28 @@
         },
         {
           "id": "PM-002",
+          "label": "Pay at Counter",
+          "current_state": "UNPAID",
+          "event": "pay_at_counter",
+          "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
+          "conditions": [
+            {
+              "path": "states.ORDER_LIFECYCLE",
+              "operator": "equals",
+              "value": "READY_FOR_PICKUP"
+            }
+          ],
+          "validation_errors": {
+            "states.ORDER_LIFECYCLE": {
+              "code": "ORDER_NOT_AT_PICKUP",
+              "severity": "BLOCKING",
+              "message": "Counter payment only allowed when order is ready for pickup."
+            }
+          },
+          "next_state": "PAID"
+        },
+        {
+          "id": "PM-003",
           "label": "Refund Payment",
           "current_state": "PAID",
           "event": "refund_payment",

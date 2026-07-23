@@ -1,4 +1,5 @@
 import React from "react";
+import { ArrowRight } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
@@ -84,8 +85,10 @@ export default function ConfigurationView({ workflowConfig }) {
                           <div className="text-xs text-zinc-500 font-bold uppercase mb-1">
                             State Change
                           </div>
-                          <div className="text-sm">
-                            {transition.current_state} ➔ {transition.next_state}
+                          <div className="text-sm flex items-center gap-1.5 font-mono">
+                            <span>{transition.current_state}</span>
+                            <ArrowRight size={12} className="text-zinc-500" />
+                            <span>{transition.next_state}</span>
                           </div>
                         </div>
                         <div>

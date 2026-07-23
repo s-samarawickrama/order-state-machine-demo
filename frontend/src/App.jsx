@@ -76,6 +76,7 @@ export default function App() {
           order={order}
           onUpdateItemAvailability={updateItemAvailability}
           onSendMessage={sendMessage}
+          onExecuteTransition={handleExecuteTransition}
         />
       )}
 

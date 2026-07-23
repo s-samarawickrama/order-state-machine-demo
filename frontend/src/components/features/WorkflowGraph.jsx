@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Workflow } from "lucide-react";
+import { Workflow, Check } from "lucide-react";
 import ReactFlow, { Background, Controls, MarkerType } from "reactflow";
 import "reactflow/dist/style.css";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -96,13 +96,13 @@ export default function WorkflowGraph({
       data: {
         label: (
           <div
-            className={`p-2 w-40 text-center rounded text-xs font-bold ${
+            className={`p-2 w-40 text-center rounded text-xs font-bold flex items-center justify-center gap-1 ${
               state.id === currentState
                 ? "bg-green-600 text-white border-green-400"
                 : "bg-zinc-800 text-zinc-300 border-zinc-700"
             } border`}
           >
-            {state.id === currentState && <span className="mr-1">✓</span>}
+            {state.id === currentState && <Check size={14} />}
             {state.display_name}
           </div>
         ),

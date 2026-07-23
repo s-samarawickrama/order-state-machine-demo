@@ -83,7 +83,49 @@ class OrderService:
             order.setdefault("context", {}).setdefault("pickup", {})["completed_at"] = datetime.now().isoformat()
             order.setdefault("context", {})["issue_reporting_window_hours"] = order.get("context", {}).get("issue_reporting_window_hours", 48)
 
-        if event == "cancel_order" and wf_name == "ORDER_LIFECYCLE":
+        elif event == "customer_confirm_expired" and wf_name == "ORDER_LIFECYCLE":
+            order.setdefault("chat_messages", []).append({
+                "sender": "SYSTEM",
+                "message": "⏱️ Order auto-cancelled: Customer did not confirm within the 12-hour SLA window.",
+                "timestamp": datetime.now().isoformat()
+            })
+
+        elif event == "pharmacy_review_expired" and wf_name == "ORDER_LIFECYCLE":
+            order.setdefault("chat_messages", []).append({
+                "sender": "SYSTEM",
+                "message": "⏱️ Order auto-cancelled: Pharmacy failed to review prescription within the 2-hour SLA window.",
+                "timestamp": datetime.now().isoformat()
+            })
+
+        elif event == "request_extension" and wf_name == "ORDER_LIFECYCLE":
+            order.setdefault("context", {}).setdefault("pickup", {})["extension_requested"] = True
+            order.setdefault("context", {}).setdefault("pickup", {})["customer_contacted"] = True
+            new_deadline = order.get("context", {}).get("pickup", {}).get("deadline", "Tomorrow 5:00 PM")
+            order.setdefault("chat_messages", []).append({
+                "sender": "SYSTEM",
+                "message": f"🤖 Pickup deadline extended by 24 hours. New deadline: {new_deadline}",
+                "timestamp": datetime.now().isoformat()
+            })
+
+        elif event == "pickup_deadline_expired" and wf_name == "ORDER_LIFECYCLE":
+            customer_contacted = order.get("context", {}).get("pickup", {}).get("customer_contacted", False)
+            if not customer_contacted:
+                current_no_shows = order.get("context", {}).setdefault("customer", {}).get("no_show_count", 0)
+                order["context"]["customer"]["no_show_count"] = current_no_shows + 1
+                order["context"]["no_show_recorded"] = True
+                msg = f"⚠️ Order closed due to uncollected pickup deadline. No-show recorded (Total no-shows: {current_no_shows + 1})."
+            else:
+                order["context"]["no_show_recorded"] = False
+                order["context"]["expired_with_contact"] = True
+                msg = "ℹ️ Order closed due to pickup deadline expiration. Customer had previously contacted pharmacy; no-show penalty bypassed."
+            
+            order.setdefault("chat_messages", []).append({
+                "sender": "SYSTEM",
+                "message": msg,
+                "timestamp": datetime.now().isoformat()
+            })
+
+        elif event == "cancel_order" and wf_name == "ORDER_LIFECYCLE":
             policy_res = self.policy_engine.evaluate_cancellation(order, previous_state)
             order.setdefault("context", {})["late_cancellation"] = policy_res.get("late_cancellation", False)
             if policy_res.get("cancel_stage"):
@@ -125,17 +167,6 @@ class OrderService:
                     )
                 except Exception:
                     pass
-
-        elif event == "pickup_deadline_expired" and wf_name == "ORDER_LIFECYCLE":
-            policy_res = self.policy_engine.evaluate_no_show(order)
-            order.setdefault("context", {})["no_show_count"] = policy_res.get("no_show_count", 0)
-            
-            if policy_res.get("chat_message"):
-                order.setdefault("chat_messages", []).append({
-                    "sender": "SYSTEM",
-                    "message": policy_res["chat_message"],
-                    "timestamp": datetime.now().isoformat()
-                })
         # ------------------------------------------
 
         policy = decision["transition"].get("policy")

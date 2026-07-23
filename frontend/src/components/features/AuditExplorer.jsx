@@ -1,5 +1,5 @@
 import React from "react";
-import { Clock } from "lucide-react";
+import { Clock, ArrowRight } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -42,12 +42,12 @@ export default function AuditExplorer({ auditLogs, order }) {
                       {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ""}
                     </span>
                   </div>
-                  <div className="text-xs text-zinc-400">
-                    State transition:{" "}
+                  <div className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
+                    <span>State transition:</span>
                     <Badge variant="outline" className="bg-zinc-800 border-zinc-700">
                       {fromState}
-                    </Badge>{" "}
-                    ➔{" "}
+                    </Badge>
+                    <ArrowRight size={12} className="text-zinc-500" />
                     <Badge variant="outline" className="bg-zinc-800 border-zinc-700">
                       {toState}
                     </Badge>

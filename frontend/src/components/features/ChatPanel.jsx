@@ -43,15 +43,25 @@ export default function ChatPanel({ order, onSendMessage }) {
 
   return (
     <Card className="bg-zinc-900 border-zinc-800 flex flex-col h-[500px]">
-      <CardHeader className="pb-3 shrink-0">
+      <CardHeader className="pb-3 shrink-0 flex flex-row items-center justify-between">
         <CardTitle className="text-sm font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
           <Clock size={16} /> Communication Channel
         </CardTitle>
+        {order.states?.ORDER_LIFECYCLE === "READY_FOR_PICKUP" && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onExecuteTransition && onExecuteTransition("request_extension")}
+            className="text-[10px] bg-indigo-950/40 border-indigo-700/60 text-indigo-300 hover:bg-indigo-900/60 h-6 px-2"
+          >
+            ⏰ Request Extension (+24h)
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="flex-1 flex flex-col overflow-hidden gap-3 pb-4">
         <div className="flex flex-col h-full justify-between">
           {/* Message list */}
-          <div className="flex-1 overflow-y-auto space-y-3 pr-2 min-h-0 max-h-[300px]">
+          <div className="flex-1 overflow-y-auto space-y-3 pr-2 min-h-0 max-h-[290px]">
             {order.chat_messages?.map((msg, index) => (
               <div
                 key={index}
@@ -64,7 +74,9 @@ export default function ChatPanel({ order, onSendMessage }) {
                 </span>
                 <div
                   className={`px-3 py-1.5 rounded-lg text-xs max-w-[85%] ${
-                    msg.sender === activeSender
+                    msg.sender === "SYSTEM"
+                      ? "bg-amber-950/50 text-amber-300 border border-amber-800/60 font-mono"
+                      : msg.sender === activeSender
                       ? "bg-indigo-600 text-white"
                       : "bg-zinc-800 text-zinc-300 border border-zinc-700"
                   }`}
@@ -80,8 +92,24 @@ export default function ChatPanel({ order, onSendMessage }) {
             )}
           </div>
 
+          {/* Quick Chat Actions */}
+          <div className="pt-2 flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setMessageText("Can I get a 24h pickup extension?")}
+              className="text-[10px] bg-zinc-950 hover:bg-zinc-800 text-zinc-400 border border-zinc-800 rounded px-2 py-0.5 flex items-center gap-1"
+            >
+              <MessageSquare size={12} /> "Can I get an extension?"
+            </button>
+            <button
+              onClick={() => setMessageText("Is my prescription ready to pick up?")}
+              className="text-[10px] bg-zinc-950 hover:bg-zinc-800 text-zinc-400 border border-zinc-800 rounded px-2 py-0.5 flex items-center gap-1"
+            >
+              <MessageSquare size={12} /> "Is it ready?"
+            </button>
+          </div>
+
           {/* Message input */}
-          <div className="pt-3 border-t border-zinc-800 mt-auto flex flex-col gap-2">
+          <div className="pt-2 border-t border-zinc-800 mt-auto flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
                 Send As:

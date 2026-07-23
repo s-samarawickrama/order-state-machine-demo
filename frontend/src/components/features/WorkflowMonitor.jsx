@@ -1,6 +1,23 @@
 import React from "react";
-import { Activity } from "lucide-react";
+import { Activity, Clock, MessageSquare, AlertTriangle } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+
+/**
+ * Formats timestamps or relative offset strings (+24h, ISO dates) cleanly for display.
+ */
+function formatTime(val) {
+  if (!val) return "N/A";
+  if (typeof val === "string" && (val.startsWith("+") || val.endsWith("h"))) {
+    return val; // Relative SLA window (e.g. "+24h", "+2h")
+  }
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return String(val);
+    return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return String(val);
+  }
+}
 
 /**
  * Derives a human-readable pickup/OTP state label from context.pickup fields,
@@ -81,6 +98,43 @@ export default function WorkflowMonitor({ order }) {
             </div>
           )}
         </div>
+
+        {/* SLA & Context Flags Badges */}
+        {order?.context && (
+          <div className="mt-4 pt-3 border-t border-zinc-800 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">SLA & Context Metadata:</span>
+            {order.context.sla?.pharmacy_review_deadline && (
+              <span className="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-300 font-mono text-[11px]">
+                Pharmacy Review SLA: <strong className="text-purple-400">{formatTime(order.context.sla.pharmacy_review_deadline)}</strong>
+              </span>
+            )}
+            {order.context.sla?.customer_confirm_deadline && (
+              <span className="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-300 font-mono text-[11px]">
+                Customer Confirm SLA: <strong className="text-orange-400">{formatTime(order.context.sla.customer_confirm_deadline)}</strong>
+              </span>
+            )}
+            {order.context.pickup?.deadline && (
+              <span className="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-300 font-mono text-[11px]">
+                Pickup Deadline: <strong className="text-indigo-400">{formatTime(order.context.pickup.deadline)}</strong>
+              </span>
+            )}
+            {order.context.pickup?.extension_requested && (
+              <span className="px-2 py-0.5 rounded bg-amber-950/40 border border-amber-800/60 text-amber-300 text-[10px] font-semibold flex items-center gap-1">
+                <Clock size={12} /> Extension Requested (+24h)
+              </span>
+            )}
+            {order.context.pickup?.customer_contacted && (
+              <span className="px-2 py-0.5 rounded bg-blue-950/40 border border-blue-800/60 text-blue-300 text-[10px] font-semibold flex items-center gap-1">
+                <MessageSquare size={12} /> Customer Contacted
+              </span>
+            )}
+            {order.context.customer?.no_show_count > 0 && (
+              <span className="px-2 py-0.5 rounded bg-red-950/40 border border-red-800/60 text-red-400 text-[10px] font-semibold flex items-center gap-1">
+                <AlertTriangle size={12} /> No-Show Count: {order.context.customer.no_show_count}
+              </span>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -32,6 +32,7 @@
           "allowed_roles": ["CUSTOMER"],
           "next_state": "SUBMITTED",
           "actions": [
+            { "type": "set_context", "path": "sla.pharmacy_review_deadline", "value": "+2h" },
             { "type": "DISPATCH_EVENT", "event": "start_validation" },
             { "type": "DISPATCH_EVENT", "event": "skip_validation" }
           ]
@@ -65,6 +66,30 @@
             { "path": "order_type", "operator": "equals", "value": "OTC" }
           ],
           "next_state": "WAITING_PHARMACY_CONFIRMATION"
+        },
+        {
+          "id": "OL-002C",
+          "label": "Pharmacy Review Timeout",
+          "current_state": "PRESCRIPTION_VALIDATION",
+          "event": "pharmacy_review_expired",
+          "allowed_roles": ["SYSTEM"],
+          "next_state": "CANCELLED",
+          "policy": {
+            "warning": "Pharmacy failed to review prescription within SLA window.",
+            "track_metric": "pharmacy_sla_breach"
+          }
+        },
+        {
+          "id": "OL-002D",
+          "label": "Pharmacy Review Timeout",
+          "current_state": "SUBMITTED",
+          "event": "pharmacy_review_expired",
+          "allowed_roles": ["SYSTEM"],
+          "next_state": "CANCELLED",
+          "policy": {
+            "warning": "Pharmacy failed to review order within SLA window.",
+            "track_metric": "pharmacy_sla_breach"
+          }
         },
         {
           "id": "OL-003",
@@ -104,7 +129,22 @@
           "current_state": "WAITING_PHARMACY_CONFIRMATION",
           "event": "pharmacy_confirm",
           "allowed_roles": ["PHARMACY_STAFF", "PHARMACIST"],
-          "next_state": "WAITING_CUSTOMER_CONFIRMATION"
+          "next_state": "WAITING_CUSTOMER_CONFIRMATION",
+          "actions": [
+            { "type": "set_context", "path": "sla.customer_confirm_deadline", "value": "+12h" }
+          ]
+        },
+        {
+          "id": "OL-007B",
+          "label": "Customer Confirmation Timeout",
+          "current_state": "WAITING_CUSTOMER_CONFIRMATION",
+          "event": "customer_confirm_expired",
+          "allowed_roles": ["SYSTEM"],
+          "next_state": "CANCELLED",
+          "policy": {
+            "warning": "Customer did not confirm order within 12 hours window.",
+            "track_metric": "customer_confirm_timeout"
+          }
         },
         {
           "id": "OL-008",
@@ -114,7 +154,8 @@
           "allowed_roles": ["CUSTOMER"],
           "next_state": "PREPARING",
           "actions": [
-            { "type": "CREATE_RESERVATION" }
+            { "type": "CREATE_RESERVATION" },
+            { "type": "set_context", "path": "sla.prep_started_at", "value": "now" }
           ]
         },
         {
@@ -208,12 +249,32 @@
           ]
         },
         {
+          "id": "OL-011C",
+          "label": "Request Pickup Extension",
+          "current_state": "READY_FOR_PICKUP",
+          "event": "request_extension",
+          "allowed_roles": ["CUSTOMER", "PHARMACY_STAFF", "PHARMACIST"],
+          "next_state": "READY_FOR_PICKUP",
+          "actions": [
+            { "type": "set_context", "path": "pickup.deadline", "value": "+24h" },
+            { "type": "set_context", "path": "pickup.extension_requested", "value": true },
+            { "type": "set_context", "path": "pickup.customer_contacted", "value": true }
+          ]
+        },
+        {
           "id": "OL-012",
           "label": "Pickup Deadline Expired",
           "current_state": "READY_FOR_PICKUP",
           "event": "pickup_deadline_expired",
           "allowed_roles": ["SYSTEM"],
-          "next_state": "CLOSED"
+          "next_state": "CLOSED",
+          "policy": {
+            "warning": "Order was not collected within pickup deadline.",
+            "track_metric": "no_show_evaluation"
+          },
+          "actions": [
+            { "type": "RELEASE_RESERVATION" }
+          ]
         },
         {
           "id": "OL-013",
@@ -347,11 +408,12 @@
 
     "PAYMENT": {
       "initial_state": "UNPAID",
-      "terminal_states": ["PAID", "REFUNDED"],
+      "terminal_states": ["REFUNDED"],
       "states": [
-        { "id": "UNPAID",   "display_name": "Unpaid",   "color": "slate" },
-        { "id": "PAID",     "display_name": "Paid",     "color": "green" },
-        { "id": "REFUNDED", "display_name": "Refunded", "color": "red" }
+        { "id": "UNPAID",           "display_name": "Unpaid",           "color": "slate" },
+        { "id": "PAID",             "display_name": "Paid",             "color": "green" },
+        { "id": "REFUND_REQUESTED", "display_name": "Refund Requested", "color": "orange" },
+        { "id": "REFUNDED",         "display_name": "Refunded",         "color": "red" }
       ],
       "transitions": [
         {
@@ -400,7 +462,23 @@
         },
         {
           "id": "PM-003",
-          "label": "Refund Payment",
+          "label": "Request Refund",
+          "current_state": "PAID",
+          "event": "request_refund",
+          "allowed_roles": ["CUSTOMER", "PHARMACY_STAFF", "PHARMACIST"],
+          "next_state": "REFUND_REQUESTED"
+        },
+        {
+          "id": "PM-004",
+          "label": "Approve Refund",
+          "current_state": "REFUND_REQUESTED",
+          "event": "approve_refund",
+          "allowed_roles": ["PHARMACIST", "ADMIN", "SYSTEM"],
+          "next_state": "REFUNDED"
+        },
+        {
+          "id": "PM-005",
+          "label": "Direct Refund",
           "current_state": "PAID",
           "event": "refund_payment",
           "allowed_roles": ["SYSTEM"],

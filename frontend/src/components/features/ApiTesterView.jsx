@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Play, Send, RefreshCw, Terminal, Eye, EyeOff, ShieldAlert } from "lucide-react";
+import { Play, Send, RefreshCw, Terminal, Eye, EyeOff, ShieldAlert, Clock, Zap, AlertTriangle } from "lucide-react";
 import { fetchScenarioList } from "@/api/workflowApi";
 
 export default function ApiTesterView({ workflowConfig, order, activeRole, onLoadScenario }) {
@@ -50,15 +50,30 @@ export default function ApiTesterView({ workflowConfig, order, activeRole, onLoa
     }
   }, [workflowConfig]);
 
-  // When selected workflow changes, set the first state as default
+  // When active order or selected workflow changes, sync selected state with order's current state
   useEffect(() => {
-    if (workflowConfig && selectedWorkflow) {
+    if (order && selectedWorkflow && order.states?.[selectedWorkflow]) {
+      setSelectedState(order.states[selectedWorkflow]);
+    } else if (workflowConfig && selectedWorkflow) {
       const states = workflowConfig.workflows[selectedWorkflow]?.states || [];
       if (states.length > 0) {
         setSelectedState(states[0].id);
       }
     }
-  }, [selectedWorkflow, workflowConfig]);
+  }, [order, selectedWorkflow, workflowConfig]);
+
+  // When selected state changes, auto-select the first available event for that state
+  useEffect(() => {
+    if (workflowConfig && selectedWorkflow && selectedState) {
+      const transitions = workflowConfig.workflows[selectedWorkflow]?.transitions || [];
+      const available = transitions.filter(t => t.current_state === selectedState);
+      if (available.length > 0) {
+        setSelectedEvent(available[0].event);
+      } else {
+        setSelectedEvent("");
+      }
+    }
+  }, [selectedState, selectedWorkflow, workflowConfig]);
 
   // Automatically update JSON payload template based on selections
   useEffect(() => {
@@ -252,6 +267,66 @@ export default function ApiTesterView({ workflowConfig, order, activeRole, onLoa
               </Select>
             </div>
 
+            {/* Quick SLA & Timeout Event Presets */}
+            <div className="bg-zinc-950/80 p-3 rounded-lg border border-zinc-800 space-y-2">
+              <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                <Zap size={12} className="text-amber-400" /> Real-World API Test Presets
+              </span>
+              <div className="grid grid-cols-2 gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedEndpoint("POST_TRANSITION");
+                    setSelectedEvent("pharmacy_review_expired");
+                    setRequestBody(JSON.stringify({ event: "pharmacy_review_expired", user_role: "SYSTEM" }, null, 2));
+                  }}
+                  className="text-[10px] bg-red-950/30 border-red-800/50 text-red-300 hover:bg-red-900/40 h-7 flex items-center gap-1 justify-start"
+                >
+                  <Clock size={12} /> Pharmacy SLA Timeout
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedEndpoint("POST_TRANSITION");
+                    setSelectedEvent("customer_confirm_expired");
+                    setRequestBody(JSON.stringify({ event: "customer_confirm_expired", user_role: "SYSTEM" }, null, 2));
+                  }}
+                  className="text-[10px] bg-amber-950/30 border-amber-800/50 text-amber-300 hover:bg-amber-900/40 h-7 flex items-center gap-1 justify-start"
+                >
+                  <Clock size={12} /> Customer Confirm Timeout
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedEndpoint("POST_TRANSITION");
+                    setSelectedEvent("request_extension");
+                    setRequestBody(JSON.stringify({ event: "request_extension", user_role: "CUSTOMER" }, null, 2));
+                  }}
+                  className="text-[10px] bg-indigo-950/30 border-indigo-800/50 text-indigo-300 hover:bg-indigo-900/40 h-7 flex items-center gap-1 justify-start"
+                >
+                  <Clock size={12} /> Request Pickup Extension
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedEndpoint("POST_TRANSITION");
+                    setSelectedEvent("pickup_deadline_expired");
+                    setRequestBody(JSON.stringify({ event: "pickup_deadline_expired", user_role: "SYSTEM" }, null, 2));
+                  }}
+                  className="text-[10px] bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700 h-7 flex items-center gap-1 justify-start"
+                >
+                  <AlertTriangle size={12} /> Pickup Deadline Expired
+                </Button>
+              </div>
+            </div>
+
             {/* Dropdown FSM Helpers */}
             {(selectedEndpoint === "POST_TRANSITION" || selectedEndpoint === "POST_SIMULATE") && (
               <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800/80 space-y-4">
@@ -344,50 +419,93 @@ export default function ApiTesterView({ workflowConfig, order, activeRole, onLoa
       <div className="lg:col-span-7 space-y-6">
         
         {/* Live Response Panel */}
-        <Card className="bg-zinc-900 border-zinc-800 h-[480px] flex flex-col">
-          <CardHeader className="border-b border-zinc-800 pb-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <CardTitle className="text-sm font-bold text-zinc-400 uppercase tracking-widest">
-                  HTTP Response
-                </CardTitle>
-                <CardDescription className="text-zinc-500 text-xs">
-                  Raw API output returned from the backend order engine.
-                </CardDescription>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                {responseTimeMs && (
-                  <Badge className="bg-zinc-950 border-zinc-800 text-zinc-400 text-[10px] font-mono">
-                    {responseTimeMs} ms
-                  </Badge>
+        {(() => {
+          const isPassed = responsePayload && 
+            (responsePayload.success === true || responsePayload.allowed === true) && 
+            (!responsePayload.errors || responsePayload.errors.length === 0);
+          const isFailed = responsePayload && (
+            responsePayload.success === false || 
+            responsePayload.allowed === false || 
+            (responsePayload.errors && responsePayload.errors.length > 0) ||
+            responsePayload.error
+          );
+
+          return (
+            <Card className={`bg-zinc-900 transition-colors h-[480px] flex flex-col ${
+              isPassed ? "border-emerald-500/40 shadow-lg shadow-emerald-950/20" : isFailed ? "border-red-500/40 shadow-lg shadow-red-950/20" : "border-zinc-800"
+            }`}>
+              <CardHeader className="border-b border-zinc-800 pb-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle className="text-sm font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
+                      HTTP Response
+                      {isPassed && <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">PASS</span>}
+                      {isFailed && <span className="text-xs px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-bold border border-red-500/30">FAIL</span>}
+                    </CardTitle>
+                    <CardDescription className="text-zinc-500 text-xs">
+                      Raw API output returned from the backend order engine.
+                    </CardDescription>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    {responseTimeMs && (
+                      <Badge className="bg-zinc-950 border-zinc-800 text-zinc-400 text-[10px] font-mono">
+                        {responseTimeMs} ms
+                      </Badge>
+                    )}
+                    {responseStatus && (
+                      <Badge className={`text-xs font-bold ${
+                        isPassed 
+                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" 
+                          : isFailed 
+                          ? "bg-red-500/20 text-red-400 border border-red-500/40" 
+                          : "bg-zinc-800 text-zinc-300"
+                      }`}>
+                        {responseStatus}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="flex-1 p-0 overflow-hidden relative flex flex-col">
+                {responsePayload ? (
+                  <>
+                    {/* Status Alert Summary Header */}
+                    {isPassed && (
+                      <div className="bg-emerald-950/40 border-b border-emerald-900/50 px-4 py-2 text-xs font-semibold text-emerald-300 flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Action Executed Successfully — Order state updated.
+                      </div>
+                    )}
+                    {isFailed && (
+                      <div className="bg-red-950/40 border-b border-red-900/50 px-4 py-2 text-xs font-semibold text-red-300 flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-red-400 animate-pulse"></span>
+                        Transition Failed / Blocked: {
+                          responsePayload.errors?.[0]?.message || 
+                          responsePayload.error || 
+                          "Action blocked by policy rules or unauthorized role."
+                        }
+                      </div>
+                    )}
+                    <pre className={`flex-1 overflow-auto p-4 text-xs font-mono leading-5 ${
+                      isPassed ? "text-emerald-200 bg-emerald-950/10" : isFailed ? "text-red-200 bg-red-950/10" : "text-zinc-300 bg-zinc-950"
+                    }`}>
+                      {JSON.stringify(responsePayload, null, 2)}
+                    </pre>
+                  </>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-zinc-600 bg-zinc-950/40 p-6 text-center">
+                    <Terminal className="h-10 w-10 mb-3 text-zinc-800" />
+                    <p className="text-sm font-semibold">No request dispatched yet</p>
+                    <p className="text-xs text-zinc-600 max-w-[280px] mt-1">
+                      Select an endpoint and hit "Send Request" to trigger an API interaction.
+                    </p>
+                  </div>
                 )}
-                {responseStatus && (
-                  <Badge className={`text-xs font-bold ${
-                    responseStatus.startsWith("2") ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"
-                  }`}>
-                    {responseStatus}
-                  </Badge>
-                )}
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="flex-1 p-0 overflow-hidden relative">
-            {responsePayload ? (
-              <pre className="h-full overflow-auto p-4 text-xs font-mono text-zinc-300 bg-zinc-950 selection:bg-zinc-800 selection:text-white leading-5">
-                {JSON.stringify(responsePayload, null, 2)}
-              </pre>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-zinc-600 bg-zinc-950/40 p-6 text-center">
-                <Terminal className="h-10 w-10 mb-3 text-zinc-800" />
-                <p className="text-sm font-semibold">No request dispatched yet</p>
-                <p className="text-xs text-zinc-600 max-w-[280px] mt-1">
-                  Select an endpoint and hit "Send Request" to trigger an API interaction.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* Local Request History Log */}
         <Card className="bg-zinc-900 border-zinc-800">

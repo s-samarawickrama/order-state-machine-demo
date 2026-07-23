@@ -15,6 +15,7 @@ export default function OrdersView({
   order,
   onUpdateItemAvailability,
   onSendMessage,
+  onExecuteTransition,
 }) {
   return (
     <div className="grid grid-cols-12 gap-6">
@@ -28,7 +29,7 @@ export default function OrdersView({
 
       {/* Chat Channel (right) */}
       <div className="col-span-12 md:col-span-5">
-        <ChatPanel order={order} onSendMessage={onSendMessage} />
+        <ChatPanel order={order} onSendMessage={onSendMessage} onExecuteTransition={onExecuteTransition} />
       </div>
 
       {/* Raw Order State Inspector (bottom) */}

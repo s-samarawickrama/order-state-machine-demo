@@ -113,6 +113,7 @@ Tracks physical order progress.
 ### 2. PAYMENT FSM
 - **`UNPAID`**: Default unpaid status.
 - **`PAID`**: Payment successful.
+- **`REFUND_REQUESTED`**: Customer or staff initiated refund request pending pharmacist/admin approval.
 - **`REFUNDED`**: Refund issued after policy authorization.
 
 ---

@@ -160,36 +160,36 @@ The production environment operates two parallel, synchronized state machines:
 flowchart TD
     subgraph ORDER_LIFECYCLE ["ORDER_LIFECYCLE (Main Order Journey)"]
         direction TB
-        DRAFT["DRAFT"] -->|submit_order| SUBMITTED["SUBMITTED"]
+        DRAFT["DRAFT"] -->|"submit_order"| SUBMITTED["SUBMITTED"]
         
-        SUBMITTED -->|start_validation [Auto Rx]| RX_VAL["PRESCRIPTION_VALIDATION"]
-        SUBMITTED -->|skip_validation [Auto OTC]| WAIT_PHARM["WAITING_PHARMACY_CONFIRMATION"]
+        SUBMITTED -->|"start_validation (Auto Rx)"| RX_VAL["PRESCRIPTION_VALIDATION"]
+        SUBMITTED -->|"skip_validation (Auto OTC)"| WAIT_PHARM["WAITING_PHARMACY_CONFIRMATION"]
         
-        RX_VAL -->|approve_prescription [Pharmacist]| WAIT_PHARM
-        RX_VAL -->|reject_prescription| CANCELLED["CANCELLED"]
+        RX_VAL -->|"approve_prescription (Pharmacist)"| WAIT_PHARM
+        RX_VAL -->|"reject_prescription"| CANCELLED["CANCELLED"]
         
-        WAIT_PHARM -->|confirm_availability| WAIT_CUST["WAITING_CUSTOMER_CONFIRMATION"]
-        WAIT_PHARM -->|reject_order| REJECTED["REJECTED"]
+        WAIT_PHARM -->|"confirm_availability"| WAIT_CUST["WAITING_CUSTOMER_CONFIRMATION"]
+        WAIT_PHARM -->|"reject_order"| REJECTED["REJECTED"]
         
-        WAIT_CUST -->|confirm_quote| PREP["PREPARING"]
-        WAIT_CUST -->|customer_confirm_expired| CANCELLED
+        WAIT_CUST -->|"confirm_quote"| PREP["PREPARING"]
+        WAIT_CUST -->|"customer_confirm_expired"| CANCELLED
         
-        PREP -->|mark_ready| READY["READY_FOR_PICKUP"]
-        PREP -->|cancel_order [Late Cancel]| CANCELLED
+        PREP -->|"mark_ready"| READY["READY_FOR_PICKUP"]
+        PREP -->|"cancel_order (Late Cancel)"| CANCELLED
         
-        READY -->|complete_order [OTP + PAID]| COMPLETED["COMPLETED"]
-        READY -->|pickup_deadline_expired| CLOSED["CLOSED"]
+        READY -->|"complete_order (OTP + PAID)"| COMPLETED["COMPLETED"]
+        READY -->|"pickup_deadline_expired"| CLOSED["CLOSED"]
         
-        COMPLETED -->|report_issue| ISSUE["ISSUE_REPORTED"]
-        ISSUE -->|investigate_issue| REVIEW["UNDER_REVIEW"]
-        REVIEW -->|resolve_claim| RESOLVED["RESOLVED"]
-        REVIEW -->|reject_claim| CLAIM_REJ["REJECTED (Claim)"]
+        COMPLETED -->|"report_issue"| ISSUE["ISSUE_REPORTED"]
+        ISSUE -->|"investigate_issue"| REVIEW["UNDER_REVIEW"]
+        REVIEW -->|"resolve_claim"| RESOLVED["RESOLVED"]
+        REVIEW -->|"reject_claim"| CLAIM_REJ["REJECTED (Claim)"]
     end
 
     subgraph PAYMENT ["PAYMENT (Financial Machine)"]
         direction TB
-        UNPAID["UNPAID"] -->|process_payment| PAID["PAID"]
-        PAID -->|refund_payment| REFUNDED["REFUNDED"]
+        UNPAID["UNPAID"] -->|"process_payment"| PAID["PAID"]
+        PAID -->|"refund_payment"| REFUNDED["REFUNDED"]
     end
 
     PAYMENT -. "Condition: PAYMENT == PAID & pickup.otp_verified == true" .-> COMPLETED

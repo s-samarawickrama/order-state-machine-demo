@@ -18,48 +18,48 @@ The system follows a layered architecture where API requests pass through role a
 
 ```mermaid
 graph TD
-    subgraph Client Layer
-        FE[React 19 Frontend Dashboard]
-        API_TEST[REST API Tester Component]
-        VIS[ReactFlow State Visualizer]
+    subgraph CLIENT_LAYER ["Client Layer"]
+        FE["React 19 Frontend Dashboard"]
+        API_TEST["REST API Tester Component"]
+        VIS["ReactFlow State Visualizer"]
     end
 
-    subgraph API Layer (FastAPI)
-        ROUTE[FastAPI Router api/routes.py]
-        DEP[Dependency Injection api/dependencies.py]
+    subgraph API_LAYER ["API Layer (FastAPI)"]
+        ROUTE["FastAPI Router api/routes.py"]
+        DEP["Dependency Injection api/dependencies.py"]
     end
 
-    subgraph Core Business Services
-        ORD_SVC[Order Service services/order_service.py]
-        ACT_EXEC[Action Executor services/action_executor.py]
-        AUD_SVC[Audit Service services/audit_service.py]
+    subgraph CORE_SERVICES ["Core Business Services"]
+        ORD_SVC["Order Service services/order_service.py"]
+        ACT_EXEC["Action Executor services/action_executor.py"]
+        AUD_SVC["Audit Service services/audit_service.py"]
     end
 
-    subgraph Metadata Policy Engine
-        WF_ENG[Workflow Engine engine/workflow_engine.py]
-        COND_EVAL[Condition Evaluator engine/condition_evaluator.py]
-        JSON_CFG[State Blueprint config/transitions.json]
+    subgraph ENGINE ["Metadata Policy Engine"]
+        WF_ENG["Workflow Engine engine/workflow_engine.py"]
+        COND_EVAL["Condition Evaluator engine/condition_evaluator.py"]
+        JSON_CFG["State Blueprint config/transitions.json"]
     end
 
-    subgraph Storage Layer
-        DB[(In-Memory Order Storage)]
-        LOGS[(Audit Log Repository)]
+    subgraph STORAGE ["Storage Layer"]
+        DB[("In-Memory Order Storage")]
+        LOGS[("Audit Log Repository")]
     end
 
-    FE -->|HTTP REST Requests| ROUTE
-    API_TEST -->|HTTP POST/GET| ROUTE
-    VIS -->|Fetch Workflow Metadata| ROUTE
+    FE -->|"HTTP REST Requests"| ROUTE
+    API_TEST -->|"HTTP POST/GET"| ROUTE
+    VIS -->|"Fetch Workflow Metadata"| ROUTE
 
     ROUTE --> DEP
     DEP --> ORD_SVC
 
-    ORD_SVC -->|Validate State & Rules| WF_ENG
-    WF_ENG -->|Load Blueprint| JSON_CFG
-    WF_ENG -->|Evaluate Context Rules| COND_EVAL
+    ORD_SVC -->|"Validate State & Rules"| WF_ENG
+    WF_ENG -->|"Load Blueprint"| JSON_CFG
+    WF_ENG -->|"Evaluate Context Rules"| COND_EVAL
     
-    ORD_SVC -->|Execute Side Effects| ACT_EXEC
-    ORD_SVC -->|Persist Order State| DB
-    ORD_SVC -->|Append Execution Log| AUD_SVC
+    ORD_SVC -->|"Execute Side Effects"| ACT_EXEC
+    ORD_SVC -->|"Persist Order State"| DB
+    ORD_SVC -->|"Append Execution Log"| AUD_SVC
     AUD_SVC --> LOGS
 ```
 
@@ -238,35 +238,37 @@ The policy engine decouples transition rules, permission checks, and side effect
 
 ```mermaid
 flowchart LR
-    subgraph Input Request
-        EV[Trigger Event]
-        ROLE[Role Claim]
-        CTX[Order Context Data]
+    subgraph INPUT_REQ ["Input Request"]
+        EV["Trigger Event"]
+        ROLE["Role Claim"]
+        CTX["Order Context Data"]
     end
 
-    subgraph Metadata Lookup
-        RULE[Fetch Rule from transitions.json]
+    subgraph META_LOOKUP ["Metadata Lookup"]
+        RULE["Fetch Rule from transitions.json"]
     end
 
-    subgraph Rule Validation Steps
-        STEP1{Role Permitted?}
-        STEP2{Current State Matches?}
-        STEP3{Dynamic Conditions Satisfied?}
+    subgraph RULE_VAL ["Rule Validation Steps"]
+        STEP1{"Role Permitted?"}
+        STEP2{"Current State Matches?"}
+        STEP3{"Dynamic Conditions Satisfied?"}
     end
 
-    subgraph Decision
-        PASS[Permit Transition & Dispatch Side Effects]
-        FAIL[Deny Transition & Return Diagnostic Error]
+    subgraph DECISION ["Decision"]
+        PASS["Permit Transition & Dispatch Side Effects"]
+        FAIL["Deny Transition & Return Diagnostic Error"]
     end
 
-    EV & ROLE & CTX --> RULE
+    EV --> RULE
+    ROLE --> RULE
+    CTX --> RULE
     RULE --> STEP1
-    STEP1 -- Yes --> STEP2
-    STEP1 -- No --> FAIL
-    STEP2 -- Yes --> STEP3
-    STEP2 -- No --> FAIL
-    STEP3 -- Pass --> PASS
-    STEP3 -- Fail --> FAIL
+    STEP1 -->|"Yes"| STEP2
+    STEP1 -->|"No"| FAIL
+    STEP2 -->|"Yes"| STEP3
+    STEP2 -->|"No"| FAIL
+    STEP3 -->|"Pass"| PASS
+    STEP3 -->|"Fail"| FAIL
 ```
 
 ### Core Engine Components:

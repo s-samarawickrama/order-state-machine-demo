@@ -42,7 +42,7 @@ export default function AppShell({
         <Sidebar className="border-r border-zinc-800 bg-zinc-900">
           <SidebarHeader className="p-4 border-b border-zinc-800">
             <h1 className="text-xl font-bold flex items-center gap-2 text-white">
-              <Workflow className="text-indigo-500" /> MediPick Engine
+              <Workflow className="text-indigo-500" /> Workflow Engine
             </h1>
           </SidebarHeader>
           <SidebarContent className="p-2">

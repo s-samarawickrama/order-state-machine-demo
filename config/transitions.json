@@ -410,10 +410,9 @@
       "initial_state": "UNPAID",
       "terminal_states": ["REFUNDED"],
       "states": [
-        { "id": "UNPAID",           "display_name": "Unpaid",           "color": "slate" },
-        { "id": "PAID",             "display_name": "Paid",             "color": "green" },
-        { "id": "REFUND_REQUESTED", "display_name": "Refund Requested", "color": "orange" },
-        { "id": "REFUNDED",         "display_name": "Refunded",         "color": "red" }
+        { "id": "UNPAID",   "display_name": "Unpaid",   "color": "slate" },
+        { "id": "PAID",     "display_name": "Paid",     "color": "green" },
+        { "id": "REFUNDED", "display_name": "Refunded", "color": "red" }
       ],
       "transitions": [
         {
@@ -459,22 +458,6 @@
             }
           },
           "next_state": "PAID"
-        },
-        {
-          "id": "PM-003",
-          "label": "Request Refund",
-          "current_state": "PAID",
-          "event": "request_refund",
-          "allowed_roles": ["CUSTOMER", "PHARMACY_STAFF", "PHARMACIST"],
-          "next_state": "REFUND_REQUESTED"
-        },
-        {
-          "id": "PM-004",
-          "label": "Approve Refund",
-          "current_state": "REFUND_REQUESTED",
-          "event": "approve_refund",
-          "allowed_roles": ["PHARMACIST", "ADMIN", "SYSTEM"],
-          "next_state": "REFUNDED"
         },
         {
           "id": "PM-005",
